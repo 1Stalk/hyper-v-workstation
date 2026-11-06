@@ -25,6 +25,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Auto-elevate or require Administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "03-Build-GamingVM.ps1 must be run in an elevated PowerShell session (as Administrator)."
+}
+
 Write-Host "=== Starting Build for $VMName ===" -ForegroundColor Cyan
 
 # 1. Validation
@@ -237,6 +243,7 @@ try {
         Set-ItemProperty -Path $advKey -Name "HideFileExt" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
         Set-ItemProperty -Path $advKey -Name "Hidden" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
         Set-ItemProperty -Path $advKey -Name "LaunchTo" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+        Set-ItemProperty -Path $advKey -Name "HideIcons" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
 
         # Classic Context Menu for Windows 11
         $clsidKey = "HKLM:\Offline_DEFAULT\Software\Classes\CLSID\{86caaa31-5b10-4b0d-8860-e3430144d436}\InprocServer32"
@@ -259,10 +266,18 @@ try {
     }
 
     if (Test-Path $antiOsSource) {
-        $publicDesktop = "${winLetter}:\Users\Public\Desktop"
-        New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
-        Copy-Item -Path $antiOsSource -Destination "$publicDesktop\AntiOS.exe" -Force
-        Write-Host "    -> Placed AntiOS.exe at $publicDesktop\AntiOS.exe" -ForegroundColor Gray
+        $desktopTargets = @(
+            "${winLetter}:\Users\Public\Desktop",
+            "${winLetter}:\Users\Default\Desktop"
+        )
+        if (Test-Path "${winLetter}:\Users\Gamer") {
+            $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
+        }
+        foreach ($targetDir in $desktopTargets) {
+            New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+            Copy-Item -Path $antiOsSource -Destination "$targetDir\AntiOS.exe" -Force
+            Write-Host "    -> Placed AntiOS.exe at $targetDir\AntiOS.exe" -ForegroundColor Gray
+        }
     } else {
         Write-Host "    [!] Warning: AntiOS.exe not found at $antiOsSource" -ForegroundColor Yellow
     }

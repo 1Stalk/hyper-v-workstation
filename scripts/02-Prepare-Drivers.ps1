@@ -145,6 +145,15 @@ Start-Transcript -Path "C:\Setup\guest_install.log" -Append
 
 Write-Host "=== Starting Guest Environment Initialization ===" -ForegroundColor Cyan
 
+# 0. Sync ComputerName if target saved in C:\Setup\vmname.txt
+if (Test-Path "C:\Setup\vmname.txt") {
+    $targetName = (Get-Content "C:\Setup\vmname.txt").Trim()
+    if ($targetName -and $env:COMPUTERNAME -ne $targetName) {
+        Write-Host "[+] Setting ComputerName to $targetName..."
+        Rename-Computer -NewName $targetName -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # 1. Install VDD Driver Certificates
 Write-Host "[+] Installing VDD Certificates..."
 if (Test-Path "C:\Setup\VDD\Virtual_Display_Driver.cer") {
@@ -233,18 +242,22 @@ powercfg -h off 2>$null
 Write-Host "[+] Ensuring AntiOS.exe is present on Desktop..."
 $antiOsSource = "C:\Setup\AntiOS.exe"
 if (Test-Path $antiOsSource) {
-    $publicDesktop = "C:\Users\Public\Desktop"
-    if (Test-Path $publicDesktop) {
-        Copy-Item -Path $antiOsSource -Destination "$publicDesktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
-    }
+    $desktopTargets = @(
+        "C:\Users\Public\Desktop",
+        "C:\Users\Default\Desktop",
+        "C:\Users\Gamer\Desktop"
+    )
     $userDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
-    if ($userDesktop -and (Test-Path $userDesktop)) {
-        Copy-Item -Path $antiOsSource -Destination "$userDesktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+    if ($userDesktop -and ($desktopTargets -notcontains $userDesktop)) {
+        $desktopTargets += $userDesktop
     }
-    if (Test-Path "C:\Users\Gamer\Desktop") {
-        Copy-Item -Path $antiOsSource -Destination "C:\Users\Gamer\Desktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+    foreach ($targetDir in $desktopTargets) {
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+        Copy-Item -Path $antiOsSource -Destination "$targetDir\AntiOS.exe" -Force -ErrorAction SilentlyContinue
     }
-    Write-Host "[+] AntiOS.exe deployed to Desktop."
+    Write-Host "[+] AntiOS.exe deployed to Desktops."
 }
 
 # 10. Apply Winhance UI & Privacy Tweaks
@@ -253,11 +266,12 @@ Write-Host "[+] Applying UI and Privacy Tweaks..."
 New-Item -Path "HKCU:\Software\Classes\CLSID\{86caaa31-5b10-4b0d-8860-e3430144d436}\InprocServer32" -Force -ErrorAction SilentlyContinue | Out-Null
 Set-ItemProperty -Path "HKCU:\Software\Classes\CLSID\{86caaa31-5b10-4b0d-8860-e3430144d436}\InprocServer32" -Name "(default)" -Value "" -Force -ErrorAction SilentlyContinue
 
-# Show file extensions and hidden files, open This PC
+# Show file extensions and hidden files, open This PC, ensure desktop icons visible
 New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Force -ErrorAction SilentlyContinue | Out-Null
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Hidden" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "LaunchTo" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideIcons" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
 
 # Telemetry Policies
 New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Force -ErrorAction SilentlyContinue | Out-Null

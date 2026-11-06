@@ -4,13 +4,13 @@
 .DESCRIPTION
     Scales the environment to run multiple virtual machines sharing host GPU resources.
     Uses master parent disk (differencing disk technique), provisions the new VM in ~20 seconds,
-    assigns unique static IP, unique MachineGuid, randomized vendor MAC address (Intel/Realtek/ASUS),
+    assigns unique static IP, unique MachineGuid, unique ComputerName, randomized vendor MAC address (Intel/Realtek/ASUS),
     ensures AntiOS.exe is present on Desktop, and attaches a 1GB GPU partition adapter.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$MasterVHDPath = "C:\Hyper-V\VMs\Gaming-VM1.vhdx",
+    [string]$MasterVHDPath = "C:\Hyper-V\VMs\Gaming-Base.vhdx",
     [string]$NewVMName = "Gaming-VM2",
     [string]$NewVHDPath = "C:\Hyper-V\VMs\Gaming-VM2.vhdx",
     [string]$NewGuestIP = "192.168.100.12",
@@ -23,11 +23,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== Cloning Gaming VM: $NewVMName from $MasterVHDPath ===" -ForegroundColor Cyan
-
-if (-not (Test-Path $MasterVHDPath)) {
-    throw "Master VHDX not found at: $MasterVHDPath"
+# Auto-elevate or require Administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "05-Clone-VM.ps1 must be run in an elevated PowerShell session (as Administrator)."
 }
+
+Write-Host "=== Cloning Gaming VM: $NewVMName from Master ===" -ForegroundColor Cyan
+
+# 1. Resolve Master VHDX
+if (-not (Test-Path $MasterVHDPath)) {
+    if (Test-Path "C:\Hyper-V\VMs\Gaming-Base.vhdx") {
+        $MasterVHDPath = "C:\Hyper-V\VMs\Gaming-Base.vhdx"
+    } elseif (Test-Path "C:\Hyper-V\VMs\Gaming-VM1.vhdx") {
+        $MasterVHDPath = "C:\Hyper-V\VMs\Gaming-VM1.vhdx"
+    } else {
+        throw "Master VHDX not found at: $MasterVHDPath"
+    }
+}
+Write-Host "[*] Master VHDX resolved: $MasterVHDPath" -ForegroundColor Gray
 
 # Stop master VM if currently running to ensure clean differencing disk state
 $masterVM = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.HardDrives.Path -contains $MasterVHDPath } | Select-Object -First 1
@@ -37,7 +51,14 @@ if ($masterVM -and $masterVM.State -ne 'Off') {
     Start-Sleep -Seconds 3
 }
 
-# 1. Clean existing VM if present
+# Ensure master VHDX is marked Read-Only to prevent accidental write lock or corruption
+try {
+    [System.IO.File]::SetAttributes($MasterVHDPath, [System.IO.FileAttributes]::ReadOnly)
+} catch {
+    Write-Host "    [!] Notice: Master VHDX read-only attribute note: $($_.Exception.Message)" -ForegroundColor DarkGray
+}
+
+# 2. Clean existing VM if present
 $existingVM = Get-VM -Name $NewVMName -ErrorAction SilentlyContinue
 if ($existingVM) {
     Write-Host "[!] VM '$NewVMName' already exists. Stopping and removing..." -ForegroundColor Yellow
@@ -53,51 +74,80 @@ if (Test-Path $NewVHDPath) {
     Remove-Item -Path $NewVHDPath -Force
 }
 
-# 2. Create Differencing Disk
+# 3. Create Differencing Disk
 Write-Host "[+] Creating Differencing VHDX linked to Master: $NewVHDPath..." -ForegroundColor Green
 New-VHD -ParentPath $MasterVHDPath -Path $NewVHDPath -Differencing | Out-Null
 
-# 3. Mount Differencing Disk and configure unique identity
+# 4. Mount Differencing Disk and configure unique identity
 Write-Host "[+] Customizing unique guest identity for $NewVMName (IP: $NewGuestIP)..." -ForegroundColor Green
 $mountedVhd = Mount-VHD -Path $NewVHDPath -Passthru
 $diskNumber = $mountedVhd.DiskNumber
 Start-Sleep -Seconds 2
 
+$assignedTempLetter = $null
 try {
     # Find Windows partition
     $winPart = Get-Partition -DiskNumber $diskNumber | Where-Object { $_.Type -like "*Basic data*" -or $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' } | Sort-Object Size -Descending | Select-Object -First 1
+    if (-not $winPart) {
+        throw "Failed to locate Windows partition on disk $diskNumber"
+    }
+
     $winLetter = $winPart.DriveLetter
     if (-not $winLetter) {
-        $winLetter = ($winPart | Add-PartitionAccessPath -AssignDriveLetter -PassThru).DriveLetter
+        $vol = Get-Volume -Partition $winPart -ErrorAction SilentlyContinue
+        if ($vol -and $vol.DriveLetter) {
+            $winLetter = [string]$vol.DriveLetter
+        } else {
+            $usedLetters = (Get-Volume | Where-Object { $_.DriveLetter }).DriveLetter
+            $freeLetter = 71..89 | ForEach-Object { [char]$_ } | Where-Object { $_ -notin $usedLetters } | Select-Object -First 1
+            if ($freeLetter) {
+                Set-Partition -DiskNumber $diskNumber -PartitionNumber $winPart.PartitionNumber -NewDriveLetter $freeLetter -ErrorAction SilentlyContinue | Out-Null
+                $winLetter = $freeLetter
+                $assignedTempLetter = $freeLetter
+            } else {
+                $winLetter = ($winPart | Add-PartitionAccessPath -AssignDriveLetter -PassThru -ErrorAction SilentlyContinue).DriveLetter
+            }
+        }
     }
 
-    # Update ip.txt
-    $ipFile = "${winLetter}:\Setup\ip.txt"
-    if (Test-Path (Split-Path $ipFile -Parent)) {
-        Set-Content -Path $ipFile -Value $NewGuestIP -Encoding ASCII
-        Write-Host "    -> Updated guest IP to $NewGuestIP in $ipFile" -ForegroundColor Gray
+    if (-not $winLetter) {
+        throw "Failed to obtain drive letter for partition on disk $diskNumber"
     }
+    Write-Host "    -> Mounted Windows partition at ${winLetter}:" -ForegroundColor Gray
+
+    # Update ip.txt and vmname.txt
+    $setupDir = "${winLetter}:\Setup"
+    if (-not (Test-Path $setupDir)) {
+        New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+    Set-Content -Path "$setupDir\ip.txt" -Value $NewGuestIP -Encoding ASCII
+    Set-Content -Path "$setupDir\vmname.txt" -Value $NewVMName -Encoding ASCII
+    Write-Host "    -> Configured target IP ($NewGuestIP) and target VM name ($NewVMName)" -ForegroundColor Gray
 
     # Ensure AntiOS.exe is present on Desktop
-    $publicDesktop = "${winLetter}:\Users\Public\Desktop"
-    $gamerDesktop  = "${winLetter}:\Users\Gamer\Desktop"
-    $antiOsTarget  = "$publicDesktop\AntiOS.exe"
-    $antiOsSource  = "C:\Users\server1\Desktop\localserver1\new_system\AntiOS.exe"
+    $antiOsSource = "C:\Users\server1\Desktop\localserver1\new_system\AntiOS.exe"
     if (-not (Test-Path $antiOsSource)) {
         $antiOsSource = "C:\Users\server1\Desktop\Hyper-V\staging\guest_setup\AntiOS.exe"
     }
     if (-not (Test-Path $antiOsSource)) {
-        $antiOsSource = "${winLetter}:\Setup\AntiOS.exe"
+        $antiOsSource = "$setupDir\AntiOS.exe"
     }
+
     if (Test-Path $antiOsSource) {
-        New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
-        Copy-Item -Path $antiOsSource -Destination $antiOsTarget -Force
-        Write-Host "    -> Deployed AntiOS.exe to $antiOsTarget" -ForegroundColor Gray
+        $desktopTargets = @(
+            "${winLetter}:\Users\Public\Desktop",
+            "${winLetter}:\Users\Default\Desktop"
+        )
         if (Test-Path "${winLetter}:\Users\Gamer") {
-            New-Item -ItemType Directory -Path $gamerDesktop -Force -ErrorAction SilentlyContinue | Out-Null
-            Copy-Item -Path $antiOsSource -Destination "$gamerDesktop\AntiOS.exe" -Force
-            Write-Host "    -> Deployed AntiOS.exe to $gamerDesktop\AntiOS.exe" -ForegroundColor Gray
+            $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
         }
+        foreach ($targetDir in $desktopTargets) {
+            New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+            Copy-Item -Path $antiOsSource -Destination "$targetDir\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+            Write-Host "    -> Deployed AntiOS.exe to $targetDir\AntiOS.exe" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "    [!] Warning: AntiOS.exe source not found." -ForegroundColor Yellow
     }
 
     # Unique MachineGuid and SQM MachineId in offline SOFTWARE hive
@@ -128,6 +178,32 @@ try {
         }
     }
 
+    # Unique ComputerName and Hostname in offline SYSTEM hive
+    $systemHive = "${winLetter}:\Windows\System32\config\SYSTEM"
+    if (Test-Path $systemHive) {
+        reg load HKLM\Clone_SYSTEM "$systemHive" 2>&1 | Out-Null
+        try {
+            $compKey = "HKLM:\Clone_SYSTEM\ControlSet001\Control\ComputerName\ComputerName"
+            if (-not (Test-Path $compKey)) { New-Item -Path $compKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $compKey -Name "ComputerName" -Value $NewVMName -Force -ErrorAction SilentlyContinue
+
+            $activeKey = "HKLM:\Clone_SYSTEM\ControlSet001\Control\ComputerName\ActiveComputerName"
+            if (-not (Test-Path $activeKey)) { New-Item -Path $activeKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $activeKey -Name "ComputerName" -Value $NewVMName -Force -ErrorAction SilentlyContinue
+
+            $tcpKey = "HKLM:\Clone_SYSTEM\ControlSet001\Services\Tcpip\Parameters"
+            if (-not (Test-Path $tcpKey)) { New-Item -Path $tcpKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $tcpKey -Name "Hostname" -Value $NewVMName -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $tcpKey -Name "NV Hostname" -Value $NewVMName -Force -ErrorAction SilentlyContinue
+            Write-Host "    -> Configured unique ComputerName and Hostname: $NewVMName" -ForegroundColor Gray
+        } finally {
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            Start-Sleep -Milliseconds 500
+            reg unload HKLM\Clone_SYSTEM 2>&1 | Out-Null
+        }
+    }
+
     # Update ComputerName in unattend.xml if present
     $pantherXml = "${winLetter}:\Windows\Panther\unattend.xml"
     $sysprepXml = "${winLetter}:\Windows\System32\Sysprep\unattend.xml"
@@ -145,11 +221,19 @@ try {
         Start-Sleep -Milliseconds 200
         reg unload HKLM\Clone_SOFTWARE 2>&1 | Out-Null
     }
+    if (Test-Path "HKLM:\Clone_SYSTEM") {
+        [GC]::Collect()
+        Start-Sleep -Milliseconds 200
+        reg unload HKLM\Clone_SYSTEM 2>&1 | Out-Null
+    }
+    if ($assignedTempLetter -and $winPart) {
+        Remove-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $winPart.PartitionNumber -AccessPath "${assignedTempLetter}:\" -ErrorAction SilentlyContinue | Out-Null
+    }
     Dismount-VHD -Path $NewVHDPath -ErrorAction SilentlyContinue | Out-Null
     Start-Sleep -Seconds 2
 }
 
-# 4. Create and Configure Hyper-V VM
+# 5. Create and Configure Hyper-V VM
 Write-Host "[+] Registering VM '$NewVMName'..." -ForegroundColor Green
 New-VM -Name $NewVMName -Generation 2 -MemoryStartupBytes $MemoryBytes -VHDPath $NewVHDPath -SwitchName $SwitchName | Out-Null
 Set-VMMemory -VMName $NewVMName -DynamicMemoryEnabled $false
@@ -161,7 +245,7 @@ Set-VM -VMName $NewVMName `
     -HighMemoryMappedIoSpace 32GB `
     -AutomaticStopAction TurnOff
 
-# 5. Assign Randomized Vendor MAC Address (Intel / Realtek / ASUS)
+# 6. Assign Randomized Vendor MAC Address (Intel / Realtek / ASUS)
 Write-Host "[+] Generating randomized vendor MAC address for $NewVMName..." -ForegroundColor Green
 $vendorOUIList = @("001B21", "001517", "001E67", "00E04C", "04D9F5", "2C4D54")
 $chosenOUI = $vendorOUIList | Get-Random
@@ -170,7 +254,7 @@ $randomMac = "$chosenOUI$($nicHex -join '')"
 Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
 Set-VMNetworkAdapter -VMName $NewVMName -StaticMacAddress $randomMac -MacAddressSpoofing On
 
-# 6. Attach GPU Partition Adapter
+# 7. Attach GPU Partition Adapter
 Write-Host "[+] Allocating GPU-PV Partition ($VRAMUnits units VRAM)..." -ForegroundColor Green
 Add-VMGpuPartitionAdapter -VMName $NewVMName
 Set-VMGpuPartitionAdapter -VMName $NewVMName `

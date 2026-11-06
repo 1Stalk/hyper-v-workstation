@@ -20,6 +20,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Auto-elevate or require Administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "04-Configure-GPU-PV.ps1 must be run in an elevated PowerShell session (as Administrator)."
+}
+
+# If VHDPath does not exist, but Gaming-Base.vhdx exists, create differencing disk
+if (-not (Test-Path $VHDPath)) {
+    $basePath = "C:\Hyper-V\VMs\Gaming-Base.vhdx"
+    if (Test-Path $basePath) {
+        Write-Host "[+] Creating differencing disk for $VMName from $basePath..." -ForegroundColor Green
+        New-VHD -ParentPath $basePath -Path $VHDPath -Differencing | Out-Null
+    } else {
+        throw "Target VHDX not found at $VHDPath and base image $basePath does not exist."
+    }
+}
+
 Write-Host "=== Configuring Hyper-V VM and GPU Partitioning for $VMName ===" -ForegroundColor Cyan
 
 # 1. Check or Clean existing VM
