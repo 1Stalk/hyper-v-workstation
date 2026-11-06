@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Prepares and stages host NVIDIA drivers, Virtual Display Driver, Sunshine, and Anti-VM HWID Spoofing tools.
 .DESCRIPTION
@@ -145,24 +145,123 @@ if (Test-Path $cleanIdScript) {
 
 # 9. Create ensure_static_ip.ps1
 $ensureNetScript = @'
-# Ensure-GamingNetwork - Guaranteed static IP watchdog for Hyper-V WinNAT
+# Ensure-GamingNetwork.ps1 - Automated Network Watchdog & Maintenance Task for Hyper-V GPU-PV Gaming VMs
+$ErrorActionPreference = "Continue"
+
+# 1. Determine target static IP for Gaming Switch
 $setupDir = "C:\Setup"
 $targetIp = "192.168.100.11"
 if (Test-Path "$setupDir\ip.txt") {
     $val = (Get-Content "$setupDir\ip.txt" -Raw).Trim()
     if ($val -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $targetIp = $val }
 }
-$gateway = "192.168.100.1"
 
+# 2. Fix LSA LimitBlankPasswordUse to allow PowerShell Direct with empty password
+try {
+    $lsaKey = "HKLM:\System\CurrentControlSet\Control\Lsa"
+    if (-not (Test-Path $lsaKey)) { New-Item -Path $lsaKey -Force | Out-Null }
+    Set-ItemProperty -Path $lsaKey -Name "LimitBlankPasswordUse" -Value 0 -Type DWord -Force
+} catch {}
+
+# 3. Purge all AntiOS leftovers completely from the system
+try {
+    Get-ChildItem -Path "C:\Users\Public\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+    Get-ChildItem -Path "C:\Users\Default\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+    Get-ChildItem -Path "C:\Users\*\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+    Get-ChildItem -Path "C:\Setup\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+    Get-ChildItem -Path "C:\*AntiOS*" -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+} catch {}
+
+# 4. Network Adapter Configuration (Dual-Adapter Architecture)
+# NIC A: VM-Gaming-Switch -> Static IP $targetIp/24, NO default gateway (for zero-latency local Moonlight streaming)
+# NIC B: Default Switch -> DHCP enabled, default gateway 172.x, DNS from DHCP (for internet browsing, downloads, updates)
 $adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -or $_.HardwareInterface }
-foreach ($nic in $adapters) {
-    $ipv4 = Get-NetIPAddress -InterfaceIndex $nic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq $targetIp }
-    if (-not $ipv4) {
-        & netsh interface ipv4 set address name="$($nic.Name)" static $targetIp 255.255.255.0 $gateway 1
-        & netsh interface ipv4 set dns name="$($nic.Name)" static 1.1.1.1 primary
-        & netsh interface ipv4 add dns name="$($nic.Name)" 8.8.8.8 index=2
-        Set-NetIPInterface -InterfaceIndex $nic.ifIndex -Dhcp Disabled -ErrorAction SilentlyContinue
+
+# Identify Internet NIC: Hyper-V Default Switch MAC begins with 00-15-5D or has IP 172.*
+$internetNic = $adapters | Where-Object { $_.MacAddress -like "00-15-5D*" }
+if (-not $internetNic) {
+    $internetNic = $adapters | Where-Object { 
+        $ipv4 = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+        $ipv4.IPAddress -notcontains $targetIp
+    } | Select-Object -First 1
+}
+
+# Gaming NIC is the remaining adapter (or the one with the randomized vendor MAC)
+$gamingNic = $adapters | Where-Object { $_.ifIndex -ne $internetNic.ifIndex } | Select-Object -First 1
+if (-not $gamingNic -and $adapters.Count -eq 1) {
+    # Single NIC fallback
+    $gamingNic = $adapters[0]
+}
+
+# Configure Gaming NIC
+if ($gamingNic) {
+    $currentIP = Get-NetIPAddress -InterfaceIndex $gamingNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -eq $targetIp }
+    if (-not $currentIP) {
+        & netsh interface ipv4 set address name="$($gamingNic.Name)" static $targetIp 255.255.255.0 none
+        Set-NetIPInterface -InterfaceIndex $gamingNic.ifIndex -Dhcp Disabled -ErrorAction SilentlyContinue
     }
+    # Ensure no default gateway is set on Gaming NIC so it does not hijack internet routing
+    $gamingGw = Get-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue
+    if ($gamingGw) {
+        Remove-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
+    }
+}
+
+# Configure Internet NIC (Default Switch) - Idempotent
+if ($internetNic) {
+    $ipInt = Get-NetIPInterface -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+    $hasRealIp = Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -like "172.*" }
+    
+    if (-not $hasRealIp -or $ipInt.Dhcp -ne "Enabled") {
+        Set-NetIPInterface -InterfaceIndex $internetNic.ifIndex -Dhcp Enabled -InterfaceMetric 10 -ErrorAction SilentlyContinue
+        Set-DnsClientServerAddress -InterfaceIndex $internetNic.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
+        & netsh interface ipv4 set address name="$($internetNic.Name)" dhcp
+        & netsh interface ipv4 set dns name="$($internetNic.Name)" dhcp
+        & cmd.exe /c "ipconfig /renew"
+        Start-Sleep -Seconds 3
+    }
+}
+
+# 5. Verify Internet Connectivity & Diagnostics
+$pingRes = Test-Connection -TargetName 1.1.1.1 -Count 2 -Quiet -ErrorAction SilentlyContinue
+$dnsRes = Resolve-DnsName -Name google.com -ErrorAction SilentlyContinue | Select-Object -ExpandProperty IPAddress -First 1
+$webRes = $null
+try {
+    $webRes = (Invoke-WebRequest -Uri https://www.google.com -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue).StatusCode
+} catch {}
+
+$diag = [PSCustomObject]@{
+    Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    VMName = $env:COMPUTERNAME
+    TargetIP = $targetIp
+    GamingNic = if ($gamingNic) { "$($gamingNic.Name) ($($gamingNic.MacAddress))" } else { "None" }
+    InternetNic = if ($internetNic) { "$($internetNic.Name) ($($internetNic.MacAddress))" } else { "None" }
+    Ping1111 = $pingRes
+    DnsGoogle = $dnsRes
+    WebStatusCode = $webRes
+    AllIPs = (Get-NetIPAddress -AddressFamily IPv4 | ForEach-Object { "$($_.InterfaceAlias): $($_.IPAddress)" }) -join "; "
+}
+$diag | Format-List | Out-File "C:\Setup\net_status.txt" -Encoding UTF8
+
+# 6. Publish Status to Sunshine apps.json so it is externally visible via API
+$sunshineApps = "C:\Program Files\Sunshine\config\apps.json"
+if (Test-Path $sunshineApps) {
+    try {
+        $json = Get-Content $sunshineApps -Raw | ConvertFrom-Json
+        $statApp = $json.apps | Where-Object { $_.name -like "SystemStatus*" }
+        $statusStr = "SystemStatus [IP: $targetIp | Internet: $(if ($webRes -eq 200) { 'ONLINE' } else { 'OFFLINE' }) | DNS: $dnsRes]"
+        if (-not $statApp) {
+            $json.apps += [PSCustomObject]@{
+                name = $statusStr
+                "image-path" = "desktop.png"
+            }
+        } else {
+            $statApp.name = $statusStr
+        }
+        $json | ConvertTo-Json -Depth 5 | Set-Content $sunshineApps -Encoding UTF8
+    } catch {}
 }
 '@
 [System.IO.File]::WriteAllText("$guestSetupStaging\ensure_static_ip.ps1", $ensureNetScript, [System.Text.UTF8Encoding]::new($true))

@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Instantly provisions an additional Gaming VM using Differencing VHDX and GPU-PV with full hardware randomization.
 .DESCRIPTION
@@ -257,6 +257,14 @@ Set-VM -VMName $NewVMName `
     -LowMemoryMappedIoSpace 1GB `
     -HighMemoryMappedIoSpace 32GB `
     -AutomaticStopAction TurnOff
+
+# Attach secondary network adapter to Default Switch for high-speed Internet NAT
+$defaultSwitch = Get-VMSwitch -Name "Default Switch" -ErrorAction SilentlyContinue
+if ($defaultSwitch) {
+    Write-Host "[+] Attaching secondary network adapter connected to 'Default Switch' for Internet..." -ForegroundColor Green
+    Add-VMNetworkAdapter -VMName $NewVMName -SwitchName "Default Switch" -Name "Internet" -ErrorAction SilentlyContinue | Out-Null
+}
+Enable-VMIntegrationService -VMName $NewVMName -Name "Guest Service Interface" -ErrorAction SilentlyContinue | Out-Null
 
 # 7. Hardware Randomization: SMBIOS via Hyper-V WMI v2
 Write-Host "[+] Applying SMBIOS hardware randomization via WMI v2..." -ForegroundColor Green

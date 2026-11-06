@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Hyper-V Workstation - Unified Management Launcher and Viewer for GPU-PV Gaming VMs.
 .DESCRIPTION
@@ -529,25 +529,44 @@ $BtnPairMoonlight.Add_Click({
 
     Write-ConsoleLog "Связывание Moonlight с хостом $($sel.IP) с PIN: $pin..."
     
-    # 1. Post PIN to Sunshine Web API on guest
+    # 1. Start Moonlight pairing process in background
+    try {
+        Start-Process -FilePath $MoonlightExe -ArgumentList "pair $($sel.IP) --pin $pin"
+        Start-Sleep -Seconds 2
+    } catch {
+        Write-ConsoleLog "[!] Ошибка запуска Moonlight: $($_.Exception.Message)"
+    }
+
+    # 2. Submit PIN to Sunshine Web API on guest
     try {
         $pairUrl = "https://$($sel.IP):47990/api/pin"
-        $body = @{ pin = $pin } | ConvertTo-Json
         $pairHeader = @{
             Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin1234"))
         }
 
-        # Ignore self-signed SSL certificate on guest
         [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-        Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue
-        Write-ConsoleLog "[+] PIN отправлен в Sunshine API."
+        $pending = Invoke-RestMethod -Uri $pairUrl -Method Get -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue
+        if ($pending -and $pending.pairings -and $pending.pairings.Count -gt 0) {
+            $pId = $pending.pairings[0].id
+            $devName = $pending.pairings[0].name
+            $body = @{
+                pairing_id = $pId
+                pin = $pin
+                name = $devName
+            } | ConvertTo-Json
+            Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+            Write-ConsoleLog "[+] PIN успешно подтвержден в Sunshine API для устройства '$devName'."
+        } else {
+            # Direct PIN submission fallback
+            $body = @{ pin = $pin } | ConvertTo-Json
+            Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+            Write-ConsoleLog "[+] Запрос PIN отправлен в Sunshine API."
+        }
     } catch {
-        Write-ConsoleLog "[!] Не удалось автоматически передать PIN через API (возможно служба еще запускается): $($_.Exception.Message)"
+        Write-ConsoleLog "[!] Замечание при передаче PIN через API: $($_.Exception.Message)"
     }
 
-    # 2. Run Moonlight pairing command
-    Start-Process -FilePath $MoonlightExe -ArgumentList "pair $($sel.IP) --pin $pin"
-    Write-ConsoleLog "Команда сопряжения Moonlight отправлена."
+    Write-ConsoleLog "Команда сопряжения Moonlight завершена."
 })
 
 $BtnVMConnect.Add_Click({

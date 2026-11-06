@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Host-HyperV-Randomize.ps1 - Hardware spoofing and identifier randomizer for Hyper-V GPU-PV VMs.
     Specifically designed for Windows 11 24H2 / 25H2 environments.
@@ -148,8 +148,14 @@ if ($VHDXPath -and (Test-Path $VHDXPath)) {
 # 4. Randomize MAC Address
 Write-Host "[3/5] Randomizing MAC Address..." -ForegroundColor Yellow
 try {
-    Set-VMNetworkAdapter -VMName $VMName -StaticMacAddress $NewMacAddress -MacAddressSpoofing On
-    Write-Host "  [+] Static MAC assigned: $NewMacAddress (Vendor OUI: $SelectedPrefix)" -ForegroundColor Green
+    $gamingAdapter = Get-VMNetworkAdapter -VMName $VMName | Where-Object { $_.SwitchName -eq 'VM-Gaming-Switch' -or $_.Name -ne 'Internet' } | Select-Object -First 1
+    if ($gamingAdapter) {
+        Set-VMNetworkAdapter -VMNetworkAdapter $gamingAdapter -StaticMacAddress $NewMacAddress -MacAddressSpoofing On
+        Write-Host "  [+] Static MAC assigned: $NewMacAddress (Vendor OUI: $SelectedPrefix) to adapter '$($gamingAdapter.Name)'" -ForegroundColor Green
+    } else {
+        Set-VMNetworkAdapter -VMName $VMName -StaticMacAddress $NewMacAddress -MacAddressSpoofing On
+        Write-Host "  [+] Static MAC assigned: $NewMacAddress (Vendor OUI: $SelectedPrefix)" -ForegroundColor Green
+    }
 } catch {
     Write-Warning "  [!] Failed to update MAC address: $_"
 }
