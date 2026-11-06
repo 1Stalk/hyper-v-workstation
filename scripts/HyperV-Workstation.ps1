@@ -32,7 +32,7 @@ try {
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Hyper-V Workstation (GPU-PV Gaming Console)" 
-        Height="650" Width="980" 
+        Height="720" Width="1020" 
         WindowStartupLocation="CenterScreen"
         Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
     <Window.Resources>
@@ -205,10 +205,11 @@ try {
             <Grid Grid.Row="2">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
 
-                <UniformGrid Grid.Row="0" Columns="4" Margin="0,0,0,16">
+                <UniformGrid Grid.Row="0" Columns="4" Margin="0,0,0,12">
                     <!-- CPU Card -->
                     <Border Background="#1f1f23" CornerRadius="8" Padding="12" Margin="4" BorderBrush="#2e2e33" BorderThickness="1">
                         <StackPanel>
@@ -246,8 +247,61 @@ try {
                     </Border>
                 </UniformGrid>
 
+                <!-- SOCKS5 External Proxy Card -->
+                <Border Grid.Row="1" Background="#1f1f23" CornerRadius="8" Padding="14,10" Margin="0,0,0,12" BorderBrush="#2e2e33" BorderThickness="1">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Proxy Header & Live Status -->
+                        <Grid Grid.Row="0" Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="🌐 SOCKS5 Проксирование" FontWeight="Bold" FontSize="13" Foreground="#f4f4f5" Margin="0,0,8,0"/>
+                                <TextBlock Text="(Внешняя изоляция • Чистый гость • DNS Leak-Free)" FontSize="11" Foreground="#71717a" VerticalAlignment="Center"/>
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Name="BadgeProxyStatus" CornerRadius="10" Padding="10,3" Background="#27272a" Margin="0,0,8,0">
+                                    <TextBlock Name="TxtProxyStatus" Text="Прямой Интернет" FontSize="11" FontWeight="Bold" Foreground="#a1a1aa"/>
+                                </Border>
+                                <Border Name="BadgeKillSwitch" CornerRadius="10" Padding="8,3" Background="#27272a">
+                                    <TextBlock Name="TxtKillSwitch" Text="🛡️ Kill-Switch: ВЫКЛ" FontSize="11" FontWeight="SemiBold" Foreground="#a1a1aa"/>
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Proxy Controls Row -->
+                        <WrapPanel Grid.Row="1" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,14,0" VerticalAlignment="Center">
+                                <TextBlock Text="Режим:" VerticalAlignment="Center" Foreground="#a1a1aa" Margin="0,0,8,0"/>
+                                <ComboBox Name="CmbProxyMode" Width="160" SelectedIndex="0" Background="#ffffff" Foreground="#09090b">
+                                    <ComboBoxItem Content="🔘 Прямое (IP Хоста)" Foreground="#09090b"/>
+                                    <ComboBoxItem Content="🔒 SOCKS5 Прокси" Foreground="#09090b"/>
+                                </ComboBox>
+                            </StackPanel>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,0,14,0" VerticalAlignment="Center">
+                                <TextBlock Text="Профиль:" VerticalAlignment="Center" Foreground="#a1a1aa" Margin="0,0,8,0"/>
+                                <ComboBox Name="CmbProxyProfiles" Width="260" Background="#ffffff" Foreground="#09090b"/>
+                            </StackPanel>
+
+                            <Button Name="BtnApplyProxy" Content="⚡ Применить" Style="{StaticResource PrimaryButton}" Margin="0,0,6,0" Padding="12,5"/>
+                            <Button Name="BtnTestProxy" Content="🔍 Проверить" Margin="0,0,6,0" Padding="12,5"/>
+                            <Button Name="BtnAddProxy" Content="➕ Добавить" Margin="0" Padding="10,5"/>
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+
                 <!-- Streaming Settings & Log Panel -->
-                <Border Grid.Row="1" Background="#1f1f23" CornerRadius="8" Padding="16" BorderBrush="#2e2e33" BorderThickness="1">
+                <Border Grid.Row="2" Background="#1f1f23" CornerRadius="8" Padding="16" BorderBrush="#2e2e33" BorderThickness="1">
                     <Grid>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -325,6 +379,22 @@ $TxtLog           = $window.FindName("TxtLog")
 $CmbResolution    = $window.FindName("CmbResolution")
 $CmbFps           = $window.FindName("CmbFps")
 $CmbMode          = $window.FindName("CmbMode")
+
+# SOCKS5 Proxy Controls
+$CmbProxyMode     = $window.FindName("CmbProxyMode")
+$CmbProxyProfiles = $window.FindName("CmbProxyProfiles")
+$BtnApplyProxy    = $window.FindName("BtnApplyProxy")
+$BtnTestProxy     = $window.FindName("BtnTestProxy")
+$BtnAddProxy      = $window.FindName("BtnAddProxy")
+$TxtProxyStatus   = $window.FindName("TxtProxyStatus")
+$BadgeProxyStatus = $window.FindName("BadgeProxyStatus")
+$TxtKillSwitch    = $window.FindName("TxtKillSwitch")
+$BadgeKillSwitch  = $window.FindName("BadgeKillSwitch")
+
+$proxyManagerScript = Join-Path $PSScriptRoot "Host-Proxy-Manager.ps1"
+if (Test-Path $proxyManagerScript) {
+    . $proxyManagerScript
+}
 
 $MoonlightExe = "C:\Program Files\Moonlight Game Streaming\Moonlight.exe"
 
@@ -407,6 +477,25 @@ function Refresh-VMList {
     }
 }
 
+function Refresh-ProxyProfilesUI {
+    $CmbProxyProfiles.Items.Clear()
+    if (Get-Command Get-ProxyConfig -ErrorAction SilentlyContinue) {
+        $cfg = Get-ProxyConfig
+        if ($cfg -and $cfg.profiles) {
+            foreach ($p in $cfg.profiles) {
+                $item = New-Object System.Windows.Controls.ComboBoxItem
+                $item.Tag = $p.id
+                $item.Content = "$($p.name) [$($p.server):$($p.port)]"
+                $item.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#09090b")
+                [void]$CmbProxyProfiles.Items.Add($item)
+            }
+        }
+    }
+    if ($CmbProxyProfiles.Items.Count -gt 0 -and $CmbProxyProfiles.SelectedIndex -lt 0) {
+        $CmbProxyProfiles.SelectedIndex = 0
+    }
+}
+
 function Update-SelectedVMDetails {
     $sel = $ListVMs.SelectedItem
     if (-not $sel) {
@@ -437,6 +526,35 @@ function Update-SelectedVMDetails {
     $TxtRAM.Text = "$($sel.RAMStartup) ГБ"
     $TxtVRAM.Text = $sel.VRAMText
     $TxtIP.Text = $sel.IP
+
+    # Update SOCKS5 Proxy Card State for selected VM
+    if (Get-Command Get-VMProxyState -ErrorAction SilentlyContinue) {
+        $proxyState = Get-VMProxyState -VMName $sel.Name
+        if ($proxyState.Enabled) {
+            $CmbProxyMode.SelectedIndex = 1
+            $TxtProxyStatus.Text = "$($proxyState.ProfileName) ($($proxyState.Server))"
+            $BadgeProxyStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#14532d")
+            $TxtProxyStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+            $TxtKillSwitch.Text = "🛡️ Kill-Switch: АКТИВЕН"
+            $BadgeKillSwitch.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#14532d")
+            $TxtKillSwitch.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+
+            for ($i = 0; $i -lt $CmbProxyProfiles.Items.Count; $i++) {
+                if ($CmbProxyProfiles.Items[$i].Tag -eq $proxyState.ProfileId) {
+                    $CmbProxyProfiles.SelectedIndex = $i
+                    break
+                }
+            }
+        } else {
+            $CmbProxyMode.SelectedIndex = 0
+            $TxtProxyStatus.Text = "Прямой Интернет (IP Хоста)"
+            $BadgeProxyStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
+            $TxtProxyStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#a1a1aa")
+            $TxtKillSwitch.Text = "🛡️ Прямой NAT"
+            $BadgeKillSwitch.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
+            $TxtKillSwitch.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#a1a1aa")
+        }
+    }
 }
 
 # Events
@@ -622,6 +740,81 @@ $BtnCloneVM.Add_Click({
     Refresh-VMList
 })
 
+# SOCKS5 Proxy Events
+$BtnApplyProxy.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для настройки прокси.", "SOCKS5 Прокси", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+
+    $isProxy = ($CmbProxyMode.SelectedIndex -eq 1)
+    $profileId = if ($CmbProxyProfiles.SelectedItem) { $CmbProxyProfiles.SelectedItem.Tag } else { "proxy-1" }
+
+    Write-ConsoleLog "Применение сетевой маршрутизации для $($sel.Name)..."
+    try {
+        Set-VMProxyRouting -VMName $sel.Name -Enabled $isProxy -ProfileId $profileId
+        if ($isProxy) {
+            Write-ConsoleLog "SOCKS5 Прокси [$profileId] успешно активирован для $($sel.Name)! Прямой NAT отключен (Kill-Switch активен)."
+        } else {
+            Write-ConsoleLog "Прокси отключен для $($sel.Name). Восстановлен прямой Интернет (IP Хоста)."
+        }
+    } catch {
+        Write-ConsoleLog "Ошибка применения прокси: $($_.Exception.Message)"
+    }
+    Update-SelectedVMDetails
+})
+
+$BtnTestProxy.Add_Click({
+    $selItem = $CmbProxyProfiles.SelectedItem
+    if (-not $selItem) { return }
+    $profId = $selItem.Tag
+    $cfg = Get-ProxyConfig
+    $prof = $cfg.profiles | Where-Object { $_.id -eq $profId } | Select-Object -First 1
+    if (-not $prof) { return }
+
+    Write-ConsoleLog "Тестирование прокси '$($prof.name)' ($($prof.server):$($prof.port))..."
+    $res = Test-ProxyEndpoint -Server $prof.server -Port $prof.port -Username $prof.username -Password $prof.password
+    if ($res.Success) {
+        Write-ConsoleLog "Результат теста: УСПЕХ! Внешний IP: $($res.IP) ($($res.Country), $($res.City)), Пинг: $($res.LatencyMs) мс"
+    } else {
+        Write-ConsoleLog "Результат теста: ОШИБКА ($($res.Error))"
+    }
+})
+
+$BtnAddProxy.Add_Click({
+    $pName = [Microsoft.VisualBasic.Interaction]::InputBox("Введите название нового профиля прокси:", "Новый SOCKS5", "My SOCKS5 Proxy")
+    if ([string]::IsNullOrWhiteSpace($pName)) { return }
+
+    $pServer = [Microsoft.VisualBasic.Interaction]::InputBox("Введите IP адрес или хост SOCKS5 сервера:", "Хост прокси", "")
+    if ([string]::IsNullOrWhiteSpace($pServer)) { return }
+
+    $pPortStr = [Microsoft.VisualBasic.Interaction]::InputBox("Введите порт SOCKS5 сервера:", "Порт", "1080")
+    [int]$pPort = 1080
+    [int]::TryParse($pPortStr, [ref]$pPort) | Out-Null
+
+    $pUser = [Microsoft.VisualBasic.Interaction]::InputBox("Введите логин (оставьте пустым если без авторизации):", "Логин", "")
+    $pPass = [Microsoft.VisualBasic.Interaction]::InputBox("Введите пароль:", "Пароль", "")
+
+    $cfg = Get-ProxyConfig
+    $newId = "proxy-" + ($cfg.profiles.Count + 1)
+    $newProf = [PSCustomObject]@{
+        id = $newId
+        name = $pName
+        server = $pServer.Trim()
+        port = $pPort
+        username = $pUser.Trim()
+        password = $pPass.Trim()
+        country = "Unknown"
+        city = "Custom"
+        isp = "Custom"
+    }
+    $cfg.profiles += $newProf
+    Save-ProxyConfig $cfg
+    Refresh-ProxyProfilesUI
+    Write-ConsoleLog "Профиль '$pName' успешно добавлен!"
+})
+
 # Auto-refresh timer every 3 seconds
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(3)
@@ -656,6 +849,15 @@ Write-ConsoleLog "Запуск консоли Hyper-V Workstation..."
 Write-ConsoleLog "Хостовая система: Xeon E5-2696 v3 • GTX 1050 Ti (4GB VRAM)"
 Write-ConsoleLog "Выделение на VM: 1024 MB VRAM (250,000,000 единиц GPU-PV)"
 Write-ConsoleLog "Разрешение по умолчанию: 1024x768 @ 60 FPS"
+
+Refresh-ProxyProfilesUI
+try { 
+    Start-ProxyEngine 
+    Write-ConsoleLog "Модуль внешней SOCKS5 маршрутизации активен (Kill-Switch • DNS Leak-Free)"
+} catch {
+    Write-ConsoleLog "[!] Замечание запуска прокси: $($_.Exception.Message)"
+}
+
 Refresh-VMList
 
 $window.ShowDialog() | Out-Null

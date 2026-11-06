@@ -21,6 +21,8 @@ VMs/
 
 # Logs, debug output and temporary scripts
 *.log
+tools/sing-box/*.log
+tools/sing-box/*.err
 *.tmp
 *.bak
 *.bin
