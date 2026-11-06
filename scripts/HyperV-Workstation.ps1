@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Hyper-V Workstation - Unified Management Launcher and Viewer for GPU-PV Gaming VMs.
 .DESCRIPTION
