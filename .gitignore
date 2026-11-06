@@ -1,0 +1,46 @@
+# ==============================================================================
+# Hyper-V GPU Partitioning (GPU-PV) - Git Ignore Rules
+# ==============================================================================
+
+# Staging folder (downloaded installers, extracted drivers, VDD packages)
+staging/
+
+# Virtual Machine disks, differencing disks and checkpoints
+*.vhdx
+*.vhd
+*.avhdx
+*.iso
+*.img
+*.bin
+
+# Hyper-V VM state and configuration directories
+VMs/
+*.vmcx
+*.vmrs
+*.vsv
+
+# Logs, debug output and temporary scripts
+*.log
+*.tmp
+*.bak
+*.bin
+run_*.ps1
+test_*.ps1
+diag_*.txt
+*.txt
+
+# Media and screenshots
+*.png
+*.jpg
+*.jpeg
+*.bmp
+
+# Operating System files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE / Editor folders
+.vscode/
+.idea/
