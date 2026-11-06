@@ -1,20 +1,22 @@
 ﻿<#
 .SYNOPSIS
-    Creates and configures Hyper-V VM with GPU Partitioning (GPU-PV) allocating 1GB VRAM.
+    Provisions and configures Gaming-VM1 with GPU-PV and full hardware randomization.
 .DESCRIPTION
-    Sets Generation 2, 4 vCPUs, 8GB RAM, Secure Boot Off, MMIO (Low 1GB / High 32GB),
-    assigns randomized vendor MAC address (Intel/Realtek/ASUS OUI),
-    and assigns GPU Partition Adapter with 250,000,000 VRAM units (1GB out of 4GB GTX 1050 Ti).
+    Creates differencing disk from Gaming-Base.vhdx, sets unique offline identity (IP 192.168.100.11,
+    MachineGuid, ComputerName, SQM MachineId), resets SCSI Disk Identifier, randomizes SMBIOS
+    (BIOS, BaseBoard, Chassis, UUID) via Hyper-V WMI v2, assigns realistic vendor MAC address,
+    and attaches 1GB GPU partition slice. AntiOS is completely removed and superseded.
 #>
 
 [CmdletBinding()]
 param(
+    [string]$MasterVHDPath = "C:\Hyper-V\VMs\Gaming-Base.vhdx",
     [string]$VMName = "Gaming-VM1",
     [string]$VHDPath = "C:\Hyper-V\VMs\Gaming-VM1.vhdx",
+    [string]$GuestIP = "192.168.100.11",
     [string]$SwitchName = "VM-Gaming-Switch",
     [int]$CPUCount = 4,
     [int64]$MemoryBytes = 8GB,
-    # 250,000,000 units = 25% of 1,000,000,000 = 1024 MB out of 4096 MB physical VRAM
     [uint64]$VRAMUnits = 250000000
 )
 
@@ -26,23 +28,25 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
     throw "04-Configure-GPU-PV.ps1 must be run in an elevated PowerShell session (as Administrator)."
 }
 
-# If VHDPath does not exist, but Gaming-Base.vhdx exists, create differencing disk
-if (-not (Test-Path $VHDPath)) {
-    $basePath = "C:\Hyper-V\VMs\Gaming-Base.vhdx"
-    if (Test-Path $basePath) {
-        Write-Host "[+] Creating differencing disk for $VMName from $basePath..." -ForegroundColor Green
-        New-VHD -ParentPath $basePath -Path $VHDPath -Differencing | Out-Null
-    } else {
-        throw "Target VHDX not found at $VHDPath and base image $basePath does not exist."
-    }
+Write-Host "=== Configuring Gaming VM: $VMName ($GuestIP) ===" -ForegroundColor Cyan
+
+# 1. Resolve Master VHDX
+if (-not (Test-Path $MasterVHDPath)) {
+    throw "Master VHDX not found at: $MasterVHDPath"
+}
+Write-Host "[*] Master VHDX resolved: $MasterVHDPath" -ForegroundColor Gray
+
+# Ensure master VHDX is marked Read-Only
+try {
+    [System.IO.File]::SetAttributes($MasterVHDPath, [System.IO.FileAttributes]::ReadOnly)
+} catch {
+    Write-Host "    [!] Notice: Master VHDX read-only attribute: $($_.Exception.Message)" -ForegroundColor DarkGray
 }
 
-Write-Host "=== Configuring Hyper-V VM and GPU Partitioning for $VMName ===" -ForegroundColor Cyan
-
-# 1. Check or Clean existing VM
+# 2. Clean existing VM if present
 $existingVM = Get-VM -Name $VMName -ErrorAction SilentlyContinue
 if ($existingVM) {
-    Write-Host "[!] VM '$VMName' already exists. Stopping and removing old VM definition..." -ForegroundColor Yellow
+    Write-Host "[!] VM '$VMName' already exists. Stopping and removing..." -ForegroundColor Yellow
     if ($existingVM.State -ne 'Off') {
         Stop-VM -Name $VMName -TurnOff -Force
         Start-Sleep -Seconds 2
@@ -50,17 +54,173 @@ if ($existingVM) {
     Remove-VM -Name $VMName -Force
 }
 
-# 2. Create Generation 2 VM
-Write-Host "[+] Creating VM '$VMName' (Gen 2, $($MemoryBytes / 1GB)GB RAM)..." -ForegroundColor Green
-New-VM -Name $VMName -Generation 2 -MemoryStartupBytes $MemoryBytes -VHDPath $VHDPath -SwitchName $SwitchName | Out-Null
+if (Test-Path $VHDPath) {
+    Dismount-VHD -Path $VHDPath -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Seconds 1
+    Remove-Item -Path $VHDPath -Force
+}
 
-# 3. Configure VM Memory & Processor
-Write-Host "[+] Configuring Memory (Static) & Processor ($CPUCount vCPUs)..." -ForegroundColor Green
+# 3. Create Differencing Disk
+Write-Host "[+] Creating Differencing VHDX linked to Master: $VHDPath..." -ForegroundColor Green
+New-VHD -ParentPath $MasterVHDPath -Path $VHDPath -Differencing | Out-Null
+
+# 4. Mount Differencing Disk and configure unique identity
+Write-Host "[+] Customizing unique guest identity for $VMName (IP: $GuestIP)..." -ForegroundColor Green
+$mountedVhd = Mount-VHD -Path $VHDPath -Passthru
+$diskNumber = $mountedVhd.DiskNumber
+Start-Sleep -Seconds 2
+
+$assignedTempLetter = $null
+try {
+    $winPart = Get-Partition -DiskNumber $diskNumber | Where-Object { $_.Type -like "*Basic data*" -or $_.GptType -eq '{ebd0a0a2-b9e5-4433-87c0-68b6b72699c7}' } | Sort-Object Size -Descending | Select-Object -First 1
+    if (-not $winPart) {
+        throw "Failed to locate Windows partition on disk $diskNumber"
+    }
+
+    $winLetter = $winPart.DriveLetter
+    if (-not $winLetter) {
+        $vol = Get-Volume -Partition $winPart -ErrorAction SilentlyContinue
+        if ($vol -and $vol.DriveLetter) {
+            $winLetter = [string]$vol.DriveLetter
+        } else {
+            $usedLetters = (Get-Volume | Where-Object { $_.DriveLetter }).DriveLetter
+            $freeLetter = 71..89 | ForEach-Object { [char]$_ } | Where-Object { $_ -notin $usedLetters } | Select-Object -First 1
+            if ($freeLetter) {
+                Set-Partition -DiskNumber $diskNumber -PartitionNumber $winPart.PartitionNumber -NewDriveLetter $freeLetter -ErrorAction SilentlyContinue | Out-Null
+                $winLetter = $freeLetter
+                $assignedTempLetter = $freeLetter
+            } else {
+                $winLetter = ($winPart | Add-PartitionAccessPath -AssignDriveLetter -PassThru -ErrorAction SilentlyContinue).DriveLetter
+            }
+        }
+    }
+
+    if (-not $winLetter) {
+        throw "Failed to obtain drive letter for partition on disk $diskNumber"
+    }
+    Write-Host "    -> Mounted Windows partition at ${winLetter}:" -ForegroundColor Gray
+
+    # Update ip.txt and vmname.txt
+    $setupDir = "${winLetter}:\Setup"
+    if (-not (Test-Path $setupDir)) {
+        New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+    Set-Content -Path "$setupDir\ip.txt" -Value $GuestIP -Encoding ASCII
+    Set-Content -Path "$setupDir\vmname.txt" -Value $VMName -Encoding ASCII
+    Write-Host "    -> Configured target IP ($GuestIP) and target VM name ($VMName)" -ForegroundColor Gray
+
+    # Ensure AntiOS is purged
+    Get-ChildItem -Path "${winLetter}:\" -Filter "*AntiOS*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
+
+    # Ensure desktop tools are present on Desktops
+    $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
+    $desktopTargets = @(
+        "${winLetter}:\Users\Public\Desktop",
+        "${winLetter}:\Users\Default\Desktop"
+    )
+    if (Test-Path "${winLetter}:\Users\Gamer") {
+        $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
+    }
+    foreach ($targetDir in $desktopTargets) {
+        New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+        if (Test-Path $desktopToolsSource) {
+            Copy-Item -Path "$desktopToolsSource\*" -Destination $targetDir -Force -ErrorAction SilentlyContinue
+        }
+        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$targetDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$targetDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+        
+        $hwidBat = "@echo off`r`ntitle Verify-HWID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Verify-HWID.ps1`"`r`npause`r`n"
+        [System.IO.File]::WriteAllText("$targetDir\Verify-HWID.bat", $hwidBat, [System.Text.Encoding]::ASCII)
+        
+        $cleanBat = "@echo off`r`ntitle Guest-CleanID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Guest-HyperV-CleanID.ps1`"`r`npause`r`n"
+        [System.IO.File]::WriteAllText("$targetDir\Guest-CleanID.bat", $cleanBat, [System.Text.Encoding]::ASCII)
+    }
+
+    # Unique MachineGuid and SQM MachineId in offline SOFTWARE hive
+    $softwareHive = "${winLetter}:\Windows\System32\config\SOFTWARE"
+    if (Test-Path $softwareHive) {
+        reg load HKLM\VM1_SOFTWARE "$softwareHive" 2>&1 | Out-Null
+        try {
+            $newGuid = [guid]::NewGuid().ToString()
+            $newSqmGuid = "{$([guid]::NewGuid().ToString())}"
+            $cryptoKey = "HKLM:\VM1_SOFTWARE\Microsoft\Cryptography"
+            if (-not (Test-Path $cryptoKey)) { New-Item -Path $cryptoKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $cryptoKey -Name "MachineGuid" -Value $newGuid -Force
+            $sqmKey = "HKLM:\VM1_SOFTWARE\Microsoft\SQMClient"
+            if (-not (Test-Path $sqmKey)) { New-Item -Path $sqmKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $sqmKey -Name "MachineId" -Value $newSqmGuid -Force
+            Write-Host "    -> Generated unique MachineGuid: $newGuid" -ForegroundColor Gray
+
+            # Ensure RunOnce for Guest Tools initialization on boot
+            $runOnceKey = "HKLM:\VM1_SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
+            if (-not (Test-Path $runOnceKey)) { New-Item -Path $runOnceKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $runOnceKey -Name "InstallGuestTools" -Value "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Setup\install_guest_tools.ps1" -Force -ErrorAction SilentlyContinue
+        } finally {
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            Start-Sleep -Milliseconds 500
+            reg unload HKLM\VM1_SOFTWARE 2>&1 | Out-Null
+        }
+    }
+
+    # Unique ComputerName and Hostname in offline SYSTEM hive
+    $systemHive = "${winLetter}:\Windows\System32\config\SYSTEM"
+    if (Test-Path $systemHive) {
+        reg load HKLM\VM1_SYSTEM "$systemHive" 2>&1 | Out-Null
+        try {
+            $compKey = "HKLM:\VM1_SYSTEM\ControlSet001\Control\ComputerName\ComputerName"
+            if (-not (Test-Path $compKey)) { New-Item -Path $compKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $compKey -Name "ComputerName" -Value $VMName -Force -ErrorAction SilentlyContinue
+
+            $activeKey = "HKLM:\VM1_SYSTEM\ControlSet001\Control\ComputerName\ActiveComputerName"
+            if (-not (Test-Path $activeKey)) { New-Item -Path $activeKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $activeKey -Name "ComputerName" -Value $VMName -Force -ErrorAction SilentlyContinue
+
+            $tcpKey = "HKLM:\VM1_SYSTEM\ControlSet001\Services\Tcpip\Parameters"
+            if (-not (Test-Path $tcpKey)) { New-Item -Path $tcpKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $tcpKey -Name "Hostname" -Value $VMName -Force -ErrorAction SilentlyContinue
+            Set-ItemProperty -Path $tcpKey -Name "NV Hostname" -Value $VMName -Force -ErrorAction SilentlyContinue
+            Write-Host "    -> Configured unique ComputerName and Hostname: $VMName" -ForegroundColor Gray
+        } finally {
+            [GC]::Collect()
+            [GC]::WaitForPendingFinalizers()
+            Start-Sleep -Milliseconds 500
+            reg unload HKLM\VM1_SYSTEM 2>&1 | Out-Null
+        }
+    }
+
+} finally {
+    if (Test-Path "HKLM:\VM1_SOFTWARE") {
+        [GC]::Collect()
+        Start-Sleep -Milliseconds 200
+        reg unload HKLM\VM1_SOFTWARE 2>&1 | Out-Null
+    }
+    if (Test-Path "HKLM:\VM1_SYSTEM") {
+        [GC]::Collect()
+        Start-Sleep -Milliseconds 200
+        reg unload HKLM\VM1_SYSTEM 2>&1 | Out-Null
+    }
+    if ($assignedTempLetter -and $winPart) {
+        Remove-PartitionAccessPath -DiskNumber $diskNumber -PartitionNumber $winPart.PartitionNumber -AccessPath "${assignedTempLetter}:\" -ErrorAction SilentlyContinue | Out-Null
+    }
+    Dismount-VHD -Path $VHDPath -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Seconds 2
+}
+
+# 5. Reset SCSI Disk Identifier on VHDX
+Write-Host "[+] Resetting SCSI Disk Identifier for $VHDPath..." -ForegroundColor Green
+try {
+    Set-VHD -Path $VHDPath -ResetDiskIdentifier -Force -Confirm:$false
+    Write-Host "    -> Reset SCSI Disk Identifier succeeded." -ForegroundColor Gray
+} catch {
+    Write-Warning "    [!] Notice resetting disk identifier: $_"
+}
+
+# 6. Create and Configure Hyper-V VM
+Write-Host "[+] Registering VM '$VMName'..." -ForegroundColor Green
+New-VM -Name $VMName -Generation 2 -MemoryStartupBytes $MemoryBytes -VHDPath $VHDPath -SwitchName $SwitchName | Out-Null
 Set-VMMemory -VMName $VMName -DynamicMemoryEnabled $false
 Set-VMProcessor -VMName $VMName -Count $CPUCount
-
-# 4. Firmware & MMIO Configuration for GPU Partitioning
-Write-Host "[+] Disabling Secure Boot and configuring MMIO & Guest-Controlled Cache..." -ForegroundColor Green
 Set-VMFirmware -VMName $VMName -EnableSecureBoot Off
 Set-VM -VMName $VMName `
     -GuestControlledCacheTypes $true `
@@ -68,19 +228,58 @@ Set-VM -VMName $VMName `
     -HighMemoryMappedIoSpace 32GB `
     -AutomaticStopAction TurnOff
 
-# 5. Assign Randomized Vendor MAC Address (Intel / Realtek / ASUS)
+# 7. Hardware Randomization: SMBIOS via Hyper-V WMI v2
+Write-Host "[+] Applying SMBIOS hardware randomization via WMI v2..." -ForegroundColor Green
+try {
+    function Get-RandomAlphaNum([int]$length) {
+        $chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray()
+        -join ($chars | Get-Random -Count $length)
+    }
+    
+    $newBiosSerial    = Get-RandomAlphaNum 12
+    $newBoardSerial   = Get-RandomAlphaNum 14
+    $newChassisSerial = Get-RandomAlphaNum 10
+    $newAssetTag      = "AT-" + (Get-RandomAlphaNum 8)
+    $newBiosGuid      = [guid]::NewGuid().ToString().ToUpper()
+
+    $wmiNamespace = "root\virtualization\v2"
+    $cs = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_ComputerSystem -Filter "ElementName = '$VMName'"
+    if ($cs) {
+        $vssd = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_VirtualSystemSettingData | Where-Object { $_.ElementName -eq $VMName -and $_.InstanceID -like "*$($cs.Name)*" }
+        if ($vssd) {
+            $vssd['BIOSSerialNumber']      = $newBiosSerial
+            $vssd['BaseBoardSerialNumber'] = $newBoardSerial
+            $vssd['ChassisSerialNumber']   = $newChassisSerial
+            $vssd['ChassisAssetTag']       = $newAssetTag
+            $vssd['BIOSGUID']              = "{$newBiosGuid}"
+
+            $vmms = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_VirtualSystemManagementService
+            $methodParams = $vmms.GetMethodParameters("ModifySystemSettings")
+            $methodParams["SystemSettings"] = $vssd.GetText([System.Management.TextFormat]::CimDtd20)
+            $res = $vmms.InvokeMethod("ModifySystemSettings", $methodParams, $null)
+            if ($res.ReturnValue -eq 0 -or $res.ReturnValue -eq 4096) {
+                Write-Host "    -> SMBIOS Serial: $newBiosSerial, Board: $newBoardSerial, UUID: {$newBiosGuid}" -ForegroundColor Gray
+            } else {
+                Write-Warning "    [!] SMBIOS WMI returned: $($res.ReturnValue)"
+            }
+        }
+    }
+} catch {
+    Write-Warning "    [!] SMBIOS randomization warning: $_"
+}
+
+# 8. Assign Randomized Vendor MAC Address (Intel / Realtek / Dell)
 Write-Host "[+] Generating randomized vendor MAC address for $VMName..." -ForegroundColor Green
-$vendorOUIList = @("001B21", "001517", "001E67", "00E04C", "04D9F5", "2C4D54")
+$vendorOUIList = @("001B21", "00215C", "001E67", "00E04C", "04D9F5", "2C4D54", "1866DA", "B82A72")
 $chosenOUI = $vendorOUIList | Get-Random
 $nicHex = 1..3 | ForEach-Object { "{0:X2}" -f (Get-Random -Min 0 -Max 256) }
 $randomMac = "$chosenOUI$($nicHex -join '')"
 Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
 Set-VMNetworkAdapter -VMName $VMName -StaticMacAddress $randomMac -MacAddressSpoofing On
 
-# 6. Add and Configure GPU Partition Adapter
-Write-Host "[+] Attaching GPU Partition Adapter with 1GB VRAM limit ($VRAMUnits units)..." -ForegroundColor Green
+# 9. Attach GPU Partition Adapter
+Write-Host "[+] Allocating GPU-PV Partition ($VRAMUnits units VRAM)..." -ForegroundColor Green
 Add-VMGpuPartitionAdapter -VMName $VMName
-
 Set-VMGpuPartitionAdapter -VMName $VMName `
     -MinPartitionVRAM 1 `
     -MaxPartitionVRAM $VRAMUnits `
@@ -95,5 +294,4 @@ Set-VMGpuPartitionAdapter -VMName $VMName `
     -MaxPartitionEncode 18446744073709551615 `
     -OptimalPartitionEncode 18446744073709551615
 
-Write-Host "=== VM Configuration Completed Successfully! ===" -ForegroundColor Green
-Get-VMGpuPartitionAdapter -VMName $VMName | Select-Object VMName, MinPartitionVRAM, MaxPartitionVRAM, OptimalPartitionVRAM | Format-Table
+Write-Host "=== Successfully provisioned $VMName! ===" -ForegroundColor Green

@@ -197,6 +197,7 @@ try {
                 <Button Name="BtnStopVM" Content="⏹ Остановить" Style="{StaticResource DangerButton}" Width="120"/>
                 <Button Name="BtnOpenStream" Content="🖥️ Открыть окно (Moonlight)" Style="{StaticResource PrimaryButton}" Padding="16,7"/>
                 <Button Name="BtnPairMoonlight" Content="🔑 Связать Moonlight"/>
+                <Button Name="BtnRandomizeHWID" Content="🎲 Спуфинг HWID"/>
                 <Button Name="BtnVMConnect" Content="⚙️ Hyper-V Manager"/>
             </StackPanel>
 
@@ -310,6 +311,7 @@ $BtnStartVM       = $window.FindName("BtnStartVM")
 $BtnStopVM        = $window.FindName("BtnStopVM")
 $BtnOpenStream    = $window.FindName("BtnOpenStream")
 $BtnPairMoonlight = $window.FindName("BtnPairMoonlight")
+$BtnRandomizeHWID = $window.FindName("BtnRandomizeHWID")
 $BtnVMConnect     = $window.FindName("BtnVMConnect")
 $TxtVMTitle       = $window.FindName("TxtVMTitle")
 $TxtVMSub         = $window.FindName("TxtVMSub")
@@ -555,6 +557,27 @@ $BtnVMConnect.Add_Click({
     } else {
         Start-Process "virtmgmt.msc"
     }
+})
+
+$BtnRandomizeHWID.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для рандомизации HWID.", "Спуфинг HWID", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+    $vm = Get-VM -Name $sel.Name -ErrorAction SilentlyContinue
+    if ($vm -and $vm.State -ne 'Off') {
+        $ans = [System.Windows.MessageBox]::Show("ВМ '$($sel.Name)' в данный момент работает.`n`nДля безопасной модификации SMBIOS, SCSI Disk Identifier и сетевого MAC адреса ВМ должна быть выключена.`n`nВыключить ВМ и выполнить спуфинг HWID?", "Требуется остановка ВМ", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+        if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+        Write-ConsoleLog "Остановка ВМ '$($sel.Name)'..."
+        Stop-VM -Name $sel.Name -TurnOff -Force
+        Start-Sleep -Seconds 2
+    }
+    Write-ConsoleLog "Запуск спуфинга и аппаратной рандомизации для '$($sel.Name)'..."
+    $randScript = "C:\Users\server1\Desktop\Hyper-V\scripts\Host-HyperV-Randomize.ps1"
+    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$randScript`" -VMName `"$($sel.Name)`"" -Wait
+    Write-ConsoleLog "Аппаратный профиль '$($sel.Name)' успешно рандомизирован!"
+    Refresh-VMList
 })
 
 $BtnCloneVM.Add_Click({

@@ -1,11 +1,13 @@
 ﻿<#
 .SYNOPSIS
-    Instantly provisions an additional Gaming VM using Differencing VHDX and GPU-PV.
+    Instantly provisions an additional Gaming VM using Differencing VHDX and GPU-PV with full hardware randomization.
 .DESCRIPTION
     Scales the environment to run multiple virtual machines sharing host GPU resources.
     Uses master parent disk (differencing disk technique), provisions the new VM in ~20 seconds,
-    assigns unique static IP, unique MachineGuid, unique ComputerName, randomized vendor MAC address (Intel/Realtek/ASUS),
-    ensures AntiOS.exe is present on Desktop, and attaches a 1GB GPU partition adapter.
+    assigns unique static IP, unique MachineGuid, unique ComputerName, randomized SMBIOS serials,
+    randomized SCSI Disk Identifier, randomized vendor MAC address (Intel/Realtek/Dell),
+    ensures new desktop tools are present on Desktop, and attaches a 1GB GPU partition adapter.
+    AntiOS is completely removed and superseded.
 #>
 
 [CmdletBinding()]
@@ -71,6 +73,7 @@ if ($existingVM) {
 
 if (Test-Path $NewVHDPath) {
     Dismount-VHD -Path $NewVHDPath -ErrorAction SilentlyContinue | Out-Null
+    Start-Sleep -Seconds 1
     Remove-Item -Path $NewVHDPath -Force
 }
 
@@ -124,30 +127,31 @@ try {
     Set-Content -Path "$setupDir\vmname.txt" -Value $NewVMName -Encoding ASCII
     Write-Host "    -> Configured target IP ($NewGuestIP) and target VM name ($NewVMName)" -ForegroundColor Gray
 
-    # Ensure AntiOS.exe is present on Desktop
-    $antiOsSource = "C:\Users\server1\Desktop\localserver1\new_system\AntiOS.exe"
-    if (-not (Test-Path $antiOsSource)) {
-        $antiOsSource = "C:\Users\server1\Desktop\Hyper-V\staging\guest_setup\AntiOS.exe"
-    }
-    if (-not (Test-Path $antiOsSource)) {
-        $antiOsSource = "$setupDir\AntiOS.exe"
-    }
+    # Ensure AntiOS is purged
+    Get-ChildItem -Path "${winLetter}:\" -Filter "*AntiOS*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 
-    if (Test-Path $antiOsSource) {
-        $desktopTargets = @(
-            "${winLetter}:\Users\Public\Desktop",
-            "${winLetter}:\Users\Default\Desktop"
-        )
-        if (Test-Path "${winLetter}:\Users\Gamer") {
-            $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
+    # Ensure new desktop tools and HWID scripts are on Desktops
+    $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
+    $desktopTargets = @(
+        "${winLetter}:\Users\Public\Desktop",
+        "${winLetter}:\Users\Default\Desktop"
+    )
+    if (Test-Path "${winLetter}:\Users\Gamer") {
+        $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
+    }
+    foreach ($targetDir in $desktopTargets) {
+        New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+        if (Test-Path $desktopToolsSource) {
+            Copy-Item -Path "$desktopToolsSource\*" -Destination $targetDir -Force -ErrorAction SilentlyContinue
         }
-        foreach ($targetDir in $desktopTargets) {
-            New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
-            Copy-Item -Path $antiOsSource -Destination "$targetDir\AntiOS.exe" -Force -ErrorAction SilentlyContinue
-            Write-Host "    -> Deployed AntiOS.exe to $targetDir\AntiOS.exe" -ForegroundColor Gray
-        }
-    } else {
-        Write-Host "    [!] Warning: AntiOS.exe source not found." -ForegroundColor Yellow
+        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$targetDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$targetDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+        
+        $hwidBat = "@echo off`r`ntitle Verify-HWID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Verify-HWID.ps1`"`r`npause`r`n"
+        [System.IO.File]::WriteAllText("$targetDir\Verify-HWID.bat", $hwidBat, [System.Text.Encoding]::ASCII)
+        
+        $cleanBat = "@echo off`r`ntitle Guest-CleanID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Guest-HyperV-CleanID.ps1`"`r`npause`r`n"
+        [System.IO.File]::WriteAllText("$targetDir\Guest-CleanID.bat", $cleanBat, [System.Text.Encoding]::ASCII)
     }
 
     # Unique MachineGuid and SQM MachineId in offline SOFTWARE hive
@@ -233,7 +237,16 @@ try {
     Start-Sleep -Seconds 2
 }
 
-# 5. Create and Configure Hyper-V VM
+# 5. Reset SCSI Disk Identifier on Differencing VHDX
+Write-Host "[+] Resetting SCSI Disk Identifier for $NewVHDPath..." -ForegroundColor Green
+try {
+    Set-VHD -Path $NewVHDPath -ResetDiskIdentifier -Force -Confirm:$false
+    Write-Host "    -> Reset SCSI Disk Identifier succeeded." -ForegroundColor Gray
+} catch {
+    Write-Warning "    [!] Notice resetting disk identifier: $_"
+}
+
+# 6. Create and Configure Hyper-V VM
 Write-Host "[+] Registering VM '$NewVMName'..." -ForegroundColor Green
 New-VM -Name $NewVMName -Generation 2 -MemoryStartupBytes $MemoryBytes -VHDPath $NewVHDPath -SwitchName $SwitchName | Out-Null
 Set-VMMemory -VMName $NewVMName -DynamicMemoryEnabled $false
@@ -245,16 +258,56 @@ Set-VM -VMName $NewVMName `
     -HighMemoryMappedIoSpace 32GB `
     -AutomaticStopAction TurnOff
 
-# 6. Assign Randomized Vendor MAC Address (Intel / Realtek / ASUS)
+# 7. Hardware Randomization: SMBIOS via Hyper-V WMI v2
+Write-Host "[+] Applying SMBIOS hardware randomization via WMI v2..." -ForegroundColor Green
+try {
+    function Get-RandomAlphaNum([int]$length) {
+        $chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ".ToCharArray()
+        -join ($chars | Get-Random -Count $length)
+    }
+    
+    $newBiosSerial    = Get-RandomAlphaNum 12
+    $newBoardSerial   = Get-RandomAlphaNum 14
+    $newChassisSerial = Get-RandomAlphaNum 10
+    $newAssetTag      = "AT-" + (Get-RandomAlphaNum 8)
+    $newBiosGuid      = [guid]::NewGuid().ToString().ToUpper()
+
+    $wmiNamespace = "root\virtualization\v2"
+    $cs = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_ComputerSystem -Filter "ElementName = '$NewVMName'"
+    if ($cs) {
+        $vssd = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_VirtualSystemSettingData | Where-Object { $_.ElementName -eq $NewVMName -and $_.InstanceID -like "*$($cs.Name)*" }
+        if ($vssd) {
+            $vssd['BIOSSerialNumber']      = $newBiosSerial
+            $vssd['BaseBoardSerialNumber'] = $newBoardSerial
+            $vssd['ChassisSerialNumber']   = $newChassisSerial
+            $vssd['ChassisAssetTag']       = $newAssetTag
+            $vssd['BIOSGUID']              = "{$newBiosGuid}"
+
+            $vmms = Get-WmiObject -Namespace $wmiNamespace -Class Msvm_VirtualSystemManagementService
+            $methodParams = $vmms.GetMethodParameters("ModifySystemSettings")
+            $methodParams["SystemSettings"] = $vssd.GetText([System.Management.TextFormat]::CimDtd20)
+            $res = $vmms.InvokeMethod("ModifySystemSettings", $methodParams, $null)
+            if ($res.ReturnValue -eq 0 -or $res.ReturnValue -eq 4096) {
+                Write-Host "    -> SMBIOS Serial: $newBiosSerial, Board: $newBoardSerial, UUID: {$newBiosGuid}" -ForegroundColor Gray
+            } else {
+                Write-Warning "    [!] SMBIOS WMI returned: $($res.ReturnValue)"
+            }
+        }
+    }
+} catch {
+    Write-Warning "    [!] SMBIOS randomization warning: $_"
+}
+
+# 8. Assign Randomized Vendor MAC Address (Intel / Realtek / Dell)
 Write-Host "[+] Generating randomized vendor MAC address for $NewVMName..." -ForegroundColor Green
-$vendorOUIList = @("001B21", "001517", "001E67", "00E04C", "04D9F5", "2C4D54")
+$vendorOUIList = @("001B21", "00215C", "001E67", "00E04C", "04D9F5", "2C4D54", "1866DA", "B82A72")
 $chosenOUI = $vendorOUIList | Get-Random
 $nicHex = 1..3 | ForEach-Object { "{0:X2}" -f (Get-Random -Min 0 -Max 256) }
 $randomMac = "$chosenOUI$($nicHex -join '')"
 Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
 Set-VMNetworkAdapter -VMName $NewVMName -StaticMacAddress $randomMac -MacAddressSpoofing On
 
-# 7. Attach GPU Partition Adapter
+# 9. Attach GPU Partition Adapter
 Write-Host "[+] Allocating GPU-PV Partition ($VRAMUnits units VRAM)..." -ForegroundColor Green
 Add-VMGpuPartitionAdapter -VMName $NewVMName
 Set-VMGpuPartitionAdapter -VMName $NewVMName `

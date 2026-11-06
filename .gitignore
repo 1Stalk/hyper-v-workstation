@@ -44,3 +44,4 @@ $RECYCLE.BIN/
 # IDE / Editor folders
 .vscode/
 .idea/
+.example
