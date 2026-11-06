@@ -27,7 +27,11 @@ VMs/
 run_*.ps1
 test_*.ps1
 diag_*.txt
+*.reg
+handle64.exe
 *.txt
+*.reg
+handle64.exe
 
 # Media and screenshots
 *.png
