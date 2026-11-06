@@ -208,19 +208,32 @@ if ($gamingNic) {
     }
 }
 
-# Configure Internet NIC (Default Switch) - Idempotent
+# Configure Internet NIC (Default Switch) - Resilient & Idempotent
 if ($internetNic) {
     $ipInt = Get-NetIPInterface -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    $hasRealIp = Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -like "172.*" }
-    
-    if (-not $hasRealIp -or $ipInt.Dhcp -ne "Enabled") {
+    if ($ipInt.Dhcp -ne "Enabled") {
         Set-NetIPInterface -InterfaceIndex $internetNic.ifIndex -Dhcp Enabled -InterfaceMetric 10 -ErrorAction SilentlyContinue
         Set-DnsClientServerAddress -InterfaceIndex $internetNic.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
         & netsh interface ipv4 set address name="$($internetNic.Name)" dhcp
         & netsh interface ipv4 set dns name="$($internetNic.Name)" dhcp
-        & cmd.exe /c "ipconfig /renew"
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
+    }
+
+    # Check if interface has a valid routable IP (NOT APIPA 169.254.*)
+    $ipv4List = (Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+    $validIpv4 = $ipv4List | Where-Object { $_ -notlike "169.254.*" -and $_ -notlike "127.*" }
+    $hasDefaultRoute = (Get-NetRoute -InterfaceIndex $internetNic.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue)
+
+    if (-not $validIpv4 -or -not $hasDefaultRoute) {
+        & cmd.exe /c "ipconfig /renew `"$($internetNic.Name)`""
+        Start-Sleep -Seconds 2
+        $ipv4List = (Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
+        $validIpv4 = $ipv4List | Where-Object { $_ -notlike "169.254.*" -and $_ -notlike "127.*" }
+        if (-not $validIpv4) {
+            Restart-NetAdapter -Name $internetNic.Name -Confirm:$false -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 3
+            & cmd.exe /c "ipconfig /renew `"$($internetNic.Name)`""
+        }
     }
 }
 
@@ -321,15 +334,19 @@ if (Test-Path $sunshineMsi) {
 
 # 4. Configure Sunshine Credentials and Service
 Write-Host "[+] Configuring Sunshine Service and Admin Credentials..."
-$sunshineExe = "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
+$sunshineExe = "C:\Program Files\Sunshine\sunshine.exe"
+if (-not (Test-Path $sunshineExe)) {
+    $sunshineExe = "C:\Program Files\LizardByte\Sunshine\sunshine.exe"
+}
 if (Test-Path $sunshineExe) {
     & $sunshineExe --creds admin admin1234
     
-    $serviceBat = "C:\Program Files\LizardByte\Sunshine\scripts\install-service.bat"
+    $serviceBat = Join-Path (Split-Path $sunshineExe) "scripts\install-service.bat"
     if (Test-Path $serviceBat) {
         & cmd.exe /c "`"$serviceBat`""
     } else {
-        sc.exe create SunshineService binPath= "\"C:\Program Files\LizardByte\Sunshine\tools\sunshinesvc.exe\"" start= auto DisplayName= "Sunshine Service"
+        $svcExe = Join-Path (Split-Path $sunshineExe) "tools\sunshinesvc.exe"
+        sc.exe create SunshineService binPath= "`"$svcExe`"" start= auto DisplayName= "Sunshine Service"
         sc.exe start SunshineService
     }
 }
@@ -361,7 +378,7 @@ if ($netAdapter) {
 try {
     $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Setup\ensure_static_ip.ps1"
     $triggerBoot = New-ScheduledTaskTrigger -AtStartup
-    $triggerRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
+    $triggerRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1)
     $taskPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
     Register-ScheduledTask -TaskName "Ensure-GamingNetwork" -Action $action -Trigger @($triggerBoot, $triggerRepeat) -Principal $taskPrincipal -Force -ErrorAction SilentlyContinue | Out-Null
     Write-Host "[+] Registered Ensure-GamingNetwork scheduled task"
