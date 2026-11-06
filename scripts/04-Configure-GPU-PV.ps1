@@ -3,6 +3,7 @@
     Creates and configures Hyper-V VM with GPU Partitioning (GPU-PV) allocating 1GB VRAM.
 .DESCRIPTION
     Sets Generation 2, 4 vCPUs, 8GB RAM, Secure Boot Off, MMIO (Low 1GB / High 32GB),
+    assigns randomized vendor MAC address (Intel/Realtek/ASUS OUI),
     and assigns GPU Partition Adapter with 250,000,000 VRAM units (1GB out of 4GB GTX 1050 Ti).
 #>
 
@@ -50,7 +51,16 @@ Set-VM -VMName $VMName `
     -HighMemoryMappedIoSpace 32GB `
     -AutomaticStopAction TurnOff
 
-# 5. Add and Configure GPU Partition Adapter
+# 5. Assign Randomized Vendor MAC Address (Intel / Realtek / ASUS)
+Write-Host "[+] Generating randomized vendor MAC address for $VMName..." -ForegroundColor Green
+$vendorOUIList = @("001B21", "001517", "001E67", "00E04C", "04D9F5", "2C4D54")
+$chosenOUI = $vendorOUIList | Get-Random
+$nicHex = 1..3 | ForEach-Object { "{0:X2}" -f (Get-Random -Min 0 -Max 256) }
+$randomMac = "$chosenOUI$($nicHex -join '')"
+Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
+Set-VMNetworkAdapter -VMName $VMName -StaticMacAddress $randomMac -MacAddressSpoofing On
+
+# 6. Add and Configure GPU Partition Adapter
 Write-Host "[+] Attaching GPU Partition Adapter with 1GB VRAM limit ($VRAMUnits units)..." -ForegroundColor Green
 Add-VMGpuPartitionAdapter -VMName $VMName
 

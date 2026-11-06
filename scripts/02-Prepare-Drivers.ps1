@@ -117,11 +117,29 @@ Write-Host "[+] Staging Sunshine installer..." -ForegroundColor Cyan
 $sunshineMsiSource = Join-Path $StagingRoot "sunshine.msi"
 Copy-Item -Path $sunshineMsiSource -Destination "$guestSetupStaging\sunshine.msi" -Force
 
+# 6b. Stage AntiOS Utility
+Write-Host "[+] Staging AntiOS Utility..." -ForegroundColor Cyan
+$antiOsSource = "C:\Users\server1\Desktop\localserver1\new_system\AntiOS.exe"
+if (-not (Test-Path $antiOsSource)) {
+    $antiOsSource = Join-Path $guestSetupStaging "AntiOS.exe"
+}
+if (Test-Path $antiOsSource) {
+    Copy-Item -Path $antiOsSource -Destination "$guestSetupStaging\AntiOS.exe" -Force
+    Write-Host "    -> Staged AntiOS.exe to $guestSetupStaging\AntiOS.exe" -ForegroundColor Gray
+}
+
 # 7. Create guest auto-configuration script (install_guest_tools.ps1)
 Write-Host "[+] Creating guest setup automation script (install_guest_tools.ps1)..." -ForegroundColor Cyan
 $guestScript = @'
 # Guest Automated Setup Script executed on first logon
 $ErrorActionPreference = "Continue"
+
+# Auto-elevate if not running as Administrator
+$principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit
+}
 
 Start-Transcript -Path "C:\Setup\guest_install.log" -Append
 
@@ -179,17 +197,22 @@ New-NetFirewallRule -DisplayName "Sunshine UDP" -Direction Inbound -Action Allow
 
 # 6. Set Static Network IP (Configured by Unattend or Fallback)
 Write-Host "[+] Setting up Static IP..."
-$netAdapter = Get-NetAdapter | Where-Object { $_.Status -eq "Up" -or $_.Name -like "*Ethernet*" } | Select-Object -First 1
+$netAdapter = Get-NetAdapter | Select-Object -First 1
 if ($netAdapter) {
+    Enable-NetAdapter -Name $netAdapter.Name -Confirm:$false -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+
     # Read target IP if saved in C:\Setup\ip.txt
     $ip = "192.168.100.11"
     if (Test-Path "C:\Setup\ip.txt") {
         $ip = (Get-Content "C:\Setup\ip.txt").Trim()
     }
     
-    Get-NetIPAddress -InterfaceIndex $netAdapter.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
-    New-NetIPAddress -InterfaceIndex $netAdapter.ifIndex -IPAddress $ip -PrefixLength 24 -DefaultGateway "192.168.100.1" -ErrorAction SilentlyContinue | Out-Null
-    Set-DnsClientServerAddress -InterfaceIndex $netAdapter.ifIndex -ServerAddresses ("1.1.1.1", "8.8.8.8") -ErrorAction SilentlyContinue | Out-Null
+    # Use netsh for guaranteed static assignment across all Windows versions
+    & netsh interface ipv4 set address name="$($netAdapter.Name)" static $ip 255.255.255.0 192.168.100.1 1
+    & netsh interface ipv4 set dns name="$($netAdapter.Name)" static 1.1.1.1 primary
+    & netsh interface ipv4 add dns name="$($netAdapter.Name)" 8.8.8.8 index=2
+    Set-NetIPInterface -InterfaceIndex $netAdapter.ifIndex -Dhcp Disabled -ErrorAction SilentlyContinue
     Write-Host "[+] Configured IP: $ip"
 }
 
@@ -198,13 +221,58 @@ Write-Host "[+] Enabling Remote Desktop..."
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
 Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
 
-# 8. Set High Performance Power Plan
-Write-Host "[+] Setting High Performance Power Plan..."
-powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+# 8. Set High Performance Power Plan & Disable Sleep/Hibernation
+Write-Host "[+] Setting High Performance Power Plan & Disabling Sleep/Hibernation..."
+powercfg -setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c 2>$null
+powercfg /change monitor-timeout-ac 0 2>$null
+powercfg /change standby-timeout-ac 0 2>$null
+powercfg /change hibernate-timeout-ac 0 2>$null
+powercfg -h off 2>$null
+
+# 9. Deploy AntiOS Utility to Desktop
+Write-Host "[+] Ensuring AntiOS.exe is present on Desktop..."
+$antiOsSource = "C:\Setup\AntiOS.exe"
+if (Test-Path $antiOsSource) {
+    $publicDesktop = "C:\Users\Public\Desktop"
+    if (Test-Path $publicDesktop) {
+        Copy-Item -Path $antiOsSource -Destination "$publicDesktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+    }
+    $userDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+    if ($userDesktop -and (Test-Path $userDesktop)) {
+        Copy-Item -Path $antiOsSource -Destination "$userDesktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+    }
+    if (Test-Path "C:\Users\Gamer\Desktop") {
+        Copy-Item -Path $antiOsSource -Destination "C:\Users\Gamer\Desktop\AntiOS.exe" -Force -ErrorAction SilentlyContinue
+    }
+    Write-Host "[+] AntiOS.exe deployed to Desktop."
+}
+
+# 10. Apply Winhance UI & Privacy Tweaks
+Write-Host "[+] Applying UI and Privacy Tweaks..."
+# Classic Context Menu
+New-Item -Path "HKCU:\Software\Classes\CLSID\{86caaa31-5b10-4b0d-8860-e3430144d436}\InprocServer32" -Force -ErrorAction SilentlyContinue | Out-Null
+Set-ItemProperty -Path "HKCU:\Software\Classes\CLSID\{86caaa31-5b10-4b0d-8860-e3430144d436}\InprocServer32" -Name "(default)" -Value "" -Force -ErrorAction SilentlyContinue
+
+# Show file extensions and hidden files, open This PC
+New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Force -ErrorAction SilentlyContinue | Out-Null
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Hidden" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "LaunchTo" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+
+# Telemetry Policies
+New-Item -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Force -ErrorAction SilentlyContinue | Out-Null
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "MaxTelemetryAllowed" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+Set-ItemProperty -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "DoNotShowFeedbackNotifications" -Value 1 -Type DWord -Force -ErrorAction SilentlyContinue
+
+# Telemetry Services
+Get-Service "DiagTrack" -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled -ErrorAction SilentlyContinue
+Get-Service "WerSvc" -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled -ErrorAction SilentlyContinue
+Get-Service "SysMain" -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled -ErrorAction SilentlyContinue
 
 Write-Host "=== Guest Initialization Finished ===" -ForegroundColor Green
 Stop-Transcript
 '@
-Set-Content -Path "$guestSetupStaging\install_guest_tools.ps1" -Value $guestScript -Encoding UTF8
+[System.IO.File]::WriteAllText("$guestSetupStaging\install_guest_tools.ps1", $guestScript, [System.Text.UTF8Encoding]::new($true))
 
 Write-Host "=== Staging Complete! ===" -ForegroundColor Green
