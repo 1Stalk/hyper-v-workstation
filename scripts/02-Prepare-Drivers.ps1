@@ -118,19 +118,19 @@ Write-Host "[+] Staging Sunshine installer..." -ForegroundColor Cyan
 $sunshineMsiSource = Join-Path $StagingRoot "sunshine.msi"
 Copy-Item -Path $sunshineMsiSource -Destination "$guestSetupStaging\sunshine.msi" -Force
 
-# 7. Stage new desktop tools from new_system (Strictly 4 initial installers: ChromeSetup, RealVNC, Winhance, WinRAR)
-Write-Host "[+] Staging new desktop tools from new_system (Strict 4 installers)..." -ForegroundColor Cyan
+# 7. Stage new desktop tools from new_system (Strictly 5 initial installers: ChromeSetup, RealVNC, RustDesk, Winhance, WinRAR)
+Write-Host "[+] Staging new desktop tools from new_system (Strict 5 installers)..." -ForegroundColor Cyan
 $sourceNewSystem = "C:\Users\server1\Desktop\localserver1\new_system"
 $destDesktopTools = Join-Path $guestSetupStaging "desktop_tools"
 New-Item -ItemType Directory -Path $destDesktopTools -Force | Out-Null
 if (Test-Path $sourceNewSystem) {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
     foreach ($pattern in $allowedPatterns) {
         Get-ChildItem -Path $sourceNewSystem -Filter $pattern | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination $destDesktopTools -Force
         }
     }
-    Write-Host "    Staged desktop tools (4 installers) from $sourceNewSystem" -ForegroundColor Gray
+    Write-Host "    Staged desktop tools (5 installers) from $sourceNewSystem" -ForegroundColor Gray
 }
 
 # 8. Stage Sysinternals Volumeid64 and HWID Spoofing/Verification scripts
@@ -275,8 +275,8 @@ powercfg /change standby-timeout-ac 0 2>$null
 powercfg /change hibernate-timeout-ac 0 2>$null
 powercfg -h off 2>$null
 
-# 9. Deploy strictly 4 initial installers to Public Desktop (ChromeSetup, RealVNC, Winhance, WinRAR)
-Write-Host "[+] Configuring Public Desktop tools (Strict 4 installers, no duplicates)..."
+# 9. Deploy strictly 5 initial installers to Public Desktop (ChromeSetup, RealVNC, RustDesk, Winhance, WinRAR)
+Write-Host "[+] Configuring Public Desktop tools (Strict 5 installers, no duplicates)..."
 $publicDesktop = "C:\Users\Public\Desktop"
 if (-not (Test-Path $publicDesktop)) {
     New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
@@ -285,9 +285,9 @@ if (-not (Test-Path $publicDesktop)) {
 # Clean any existing bat, ps1, or leftovers from Public Desktop
 Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-# Copy exactly the 4 required installers to Public\Desktop only
+# Copy exactly the 5 required installers to Public\Desktop only
 if (Test-Path "C:\Setup\desktop_tools") {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
     foreach ($pattern in $allowedPatterns) {
         Get-ChildItem -Path "C:\Setup\desktop_tools" -Filter $pattern | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
@@ -305,6 +305,7 @@ foreach ($dupDir in $userDesktops) {
     if (Test-Path $dupDir) {
         Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\rustdesk*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue

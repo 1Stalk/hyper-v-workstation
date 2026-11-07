@@ -130,7 +130,7 @@ try {
     # Ensure AntiOS is purged
     Get-ChildItem -Path "${winLetter}:\" -Filter "*AntiOS*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 
-    # Ensure desktop tools are present strictly on Public Desktop (Strict 4 installers, no duplicates)
+    # Ensure desktop tools are present strictly on Public Desktop (Strict 5 installers, no duplicates)
     $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
     $publicDesktop = "${winLetter}:\Users\Public\Desktop"
     New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
@@ -138,9 +138,9 @@ try {
     # Clean any existing scripts or leftovers from Public Desktop
     Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-    # Copy exactly the 4 required installers to Public\Desktop only
+    # Copy exactly the 5 required installers to Public\Desktop only
     if (Test-Path $desktopToolsSource) {
-        $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+        $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
         foreach ($pattern in $allowedPatterns) {
             Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
                 Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
@@ -154,6 +154,7 @@ try {
         if (Test-Path $dupDir) {
             Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
             Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$dupDir\rustdesk*" -Force -ErrorAction SilentlyContinue
             Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
             Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
             Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue

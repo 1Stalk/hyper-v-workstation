@@ -6,7 +6,7 @@
     applies Windows 11 Pro (Index 3) directly from the ISO via DISM, configures UEFI boot,
     performs offline DISM debloat of consumer AppX packages (preserving Store and Xbox),
     applies Winhance privacy and UI tweaks (classic context menu, show extensions, disable telemetry),
-    deploys desktop tools (Chrome, RealVNC, Winhance, WinRAR, HWID tools) to Desktop,
+    deploys desktop tools (Chrome, RealVNC, RustDesk, Winhance, WinRAR) to Desktop,
     injects unattended answer file (Gamer user, autologon, high performance),
     injects host NVIDIA GPU-PV drivers into HostDriverStore, System32, and SysWOW64,
     and stages Virtual Display Driver (1024x768 @ 60Hz) and Sunshine with auto-run scripts.
@@ -207,8 +207,8 @@ try {
     reg unload HKLM\Offline_SOFTWARE 2>&1 | Out-Null
 }
 
-# 9. Deploy Desktop Tools to Guest Desktop (Strictly 4 initial installers: ChromeSetup, RealVNC, Winhance, WinRAR)
-Write-Host "[+] Deploying new desktop tools to Guest Public Desktop (Strict 4 installers, no duplicates)..." -ForegroundColor Green
+# 9. Deploy Desktop Tools to Guest Desktop (Strictly 5 initial installers: ChromeSetup, RealVNC, RustDesk, Winhance, WinRAR)
+Write-Host "[+] Deploying new desktop tools to Guest Public Desktop (Strict 5 installers, no duplicates)..." -ForegroundColor Green
 $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
 $publicDesktop = "${winLetter}:\Users\Public\Desktop"
 New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
@@ -216,9 +216,9 @@ New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyCo
 # Clean any existing scripts or leftovers from Public Desktop
 Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-# Copy exactly the 4 required installers to Public\Desktop only
+# Copy exactly the 5 required installers to Public\Desktop only
 if (Test-Path $desktopToolsSource) {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
     foreach ($pattern in $allowedPatterns) {
         Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
@@ -232,6 +232,7 @@ foreach ($dupDir in $duplicateTargets) {
     if (Test-Path $dupDir) {
         Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\rustdesk*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
