@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Prepares and stages host NVIDIA drivers, Virtual Display Driver, Sunshine, and Anti-VM HWID Spoofing tools.
 .DESCRIPTION
@@ -118,14 +118,19 @@ Write-Host "[+] Staging Sunshine installer..." -ForegroundColor Cyan
 $sunshineMsiSource = Join-Path $StagingRoot "sunshine.msi"
 Copy-Item -Path $sunshineMsiSource -Destination "$guestSetupStaging\sunshine.msi" -Force
 
-# 7. Stage new desktop tools from new_system
-Write-Host "[+] Staging new desktop tools from new_system..." -ForegroundColor Cyan
+# 7. Stage new desktop tools from new_system (Strictly 4 initial installers: ChromeSetup, RealVNC, Winhance, WinRAR)
+Write-Host "[+] Staging new desktop tools from new_system (Strict 4 installers)..." -ForegroundColor Cyan
 $sourceNewSystem = "C:\Users\server1\Desktop\localserver1\new_system"
 $destDesktopTools = Join-Path $guestSetupStaging "desktop_tools"
 New-Item -ItemType Directory -Path $destDesktopTools -Force | Out-Null
 if (Test-Path $sourceNewSystem) {
-    Copy-Item -Path "$sourceNewSystem\*" -Destination $destDesktopTools -Force
-    Write-Host "    Staged desktop tools from $sourceNewSystem" -ForegroundColor Gray
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    foreach ($pattern in $allowedPatterns) {
+        Get-ChildItem -Path $sourceNewSystem -Filter $pattern | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $destDesktopTools -Force
+        }
+    }
+    Write-Host "    Staged desktop tools (4 installers) from $sourceNewSystem" -ForegroundColor Gray
 }
 
 # 8. Stage Sysinternals Volumeid64 and HWID Spoofing/Verification scripts
@@ -143,141 +148,12 @@ if (Test-Path $cleanIdScript) {
     Copy-Item -Path $cleanIdScript -Destination "$guestSetupStaging\Guest-HyperV-CleanID.ps1" -Force
 }
 
-# 9. Create ensure_static_ip.ps1
-$ensureNetScript = @'
-# Ensure-GamingNetwork.ps1 - Automated Network Watchdog & Maintenance Task for Hyper-V GPU-PV Gaming VMs
-$ErrorActionPreference = "Continue"
-
-# 1. Determine target static IP for Gaming Switch
-$setupDir = "C:\Setup"
-$targetIp = "192.168.100.11"
-if (Test-Path "$setupDir\ip.txt") {
-    $val = (Get-Content "$setupDir\ip.txt" -Raw).Trim()
-    if ($val -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') { $targetIp = $val }
+# 9. Stage ensure_static_ip.ps1 from central staging
+Write-Host "[+] Staging ensure_static_ip.ps1 from central staging..." -ForegroundColor Cyan
+$centralWatchdog = Join-Path $StagingRoot "ensure_static_ip.ps1"
+if (Test-Path $centralWatchdog) {
+    Copy-Item -Path $centralWatchdog -Destination "$guestSetupStaging\ensure_static_ip.ps1" -Force
 }
-
-# 2. Fix LSA LimitBlankPasswordUse to allow PowerShell Direct with empty password
-try {
-    $lsaKey = "HKLM:\System\CurrentControlSet\Control\Lsa"
-    if (-not (Test-Path $lsaKey)) { New-Item -Path $lsaKey -Force | Out-Null }
-    Set-ItemProperty -Path $lsaKey -Name "LimitBlankPasswordUse" -Value 0 -Type DWord -Force
-} catch {}
-
-# 3. Purge all AntiOS leftovers completely from the system
-try {
-    Get-ChildItem -Path "C:\Users\Public\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-    Get-ChildItem -Path "C:\Users\Default\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-    Get-ChildItem -Path "C:\Users\*\Desktop\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-    Get-ChildItem -Path "C:\Setup\*AntiOS*" -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-    Get-ChildItem -Path "C:\*AntiOS*" -Recurse -Force -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-} catch {}
-
-# 4. Network Adapter Configuration (Dual-Adapter Architecture)
-# NIC A: VM-Gaming-Switch -> Static IP $targetIp/24, NO default gateway (for zero-latency local Moonlight streaming)
-# NIC B: Default Switch -> DHCP enabled, default gateway 172.x, DNS from DHCP (for internet browsing, downloads, updates)
-$adapters = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -or $_.HardwareInterface }
-
-# Identify Internet NIC: Hyper-V Default Switch MAC begins with 00-15-5D or has IP 172.*
-$internetNic = $adapters | Where-Object { $_.MacAddress -like "00-15-5D*" }
-if (-not $internetNic) {
-    $internetNic = $adapters | Where-Object { 
-        $ipv4 = Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
-        $ipv4.IPAddress -notcontains $targetIp
-    } | Select-Object -First 1
-}
-
-# Gaming NIC is the remaining adapter (or the one with the randomized vendor MAC)
-$gamingNic = $adapters | Where-Object { $_.ifIndex -ne $internetNic.ifIndex } | Select-Object -First 1
-if (-not $gamingNic -and $adapters.Count -eq 1) {
-    # Single NIC fallback
-    $gamingNic = $adapters[0]
-}
-
-# Configure Gaming NIC
-if ($gamingNic) {
-    $currentIP = Get-NetIPAddress -InterfaceIndex $gamingNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-        Where-Object { $_.IPAddress -eq $targetIp }
-    if (-not $currentIP) {
-        & netsh interface ipv4 set address name="$($gamingNic.Name)" static $targetIp 255.255.255.0 none
-        Set-NetIPInterface -InterfaceIndex $gamingNic.ifIndex -Dhcp Disabled -ErrorAction SilentlyContinue
-    }
-    # Ensure no default gateway is set on Gaming NIC so it does not hijack internet routing
-    $gamingGw = Get-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue
-    if ($gamingGw) {
-        Remove-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
-    }
-}
-
-# Configure Internet NIC (Default Switch) - Resilient & Idempotent
-if ($internetNic) {
-    $ipInt = Get-NetIPInterface -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
-    if ($ipInt.Dhcp -ne "Enabled") {
-        Set-NetIPInterface -InterfaceIndex $internetNic.ifIndex -Dhcp Enabled -InterfaceMetric 10 -ErrorAction SilentlyContinue
-        Set-DnsClientServerAddress -InterfaceIndex $internetNic.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
-        & netsh interface ipv4 set address name="$($internetNic.Name)" dhcp
-        & netsh interface ipv4 set dns name="$($internetNic.Name)" dhcp
-        Start-Sleep -Seconds 2
-    }
-
-    # Check if interface has a valid routable IP (NOT APIPA 169.254.*)
-    $ipv4List = (Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
-    $validIpv4 = $ipv4List | Where-Object { $_ -notlike "169.254.*" -and $_ -notlike "127.*" }
-    $hasDefaultRoute = (Get-NetRoute -InterfaceIndex $internetNic.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue)
-
-    if (-not $validIpv4 -or -not $hasDefaultRoute) {
-        & cmd.exe /c "ipconfig /renew `"$($internetNic.Name)`""
-        Start-Sleep -Seconds 2
-        $ipv4List = (Get-NetIPAddress -InterfaceIndex $internetNic.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
-        $validIpv4 = $ipv4List | Where-Object { $_ -notlike "169.254.*" -and $_ -notlike "127.*" }
-        if (-not $validIpv4) {
-            Restart-NetAdapter -Name $internetNic.Name -Confirm:$false -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 3
-            & cmd.exe /c "ipconfig /renew `"$($internetNic.Name)`""
-        }
-    }
-}
-
-# 5. Verify Internet Connectivity & Diagnostics
-$pingRes = Test-Connection -TargetName 1.1.1.1 -Count 2 -Quiet -ErrorAction SilentlyContinue
-$dnsRes = Resolve-DnsName -Name google.com -ErrorAction SilentlyContinue | Select-Object -ExpandProperty IPAddress -First 1
-$webRes = $null
-try {
-    $webRes = (Invoke-WebRequest -Uri https://www.google.com -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue).StatusCode
-} catch {}
-
-$diag = [PSCustomObject]@{
-    Timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    VMName = $env:COMPUTERNAME
-    TargetIP = $targetIp
-    GamingNic = if ($gamingNic) { "$($gamingNic.Name) ($($gamingNic.MacAddress))" } else { "None" }
-    InternetNic = if ($internetNic) { "$($internetNic.Name) ($($internetNic.MacAddress))" } else { "None" }
-    Ping1111 = $pingRes
-    DnsGoogle = $dnsRes
-    WebStatusCode = $webRes
-    AllIPs = (Get-NetIPAddress -AddressFamily IPv4 | ForEach-Object { "$($_.InterfaceAlias): $($_.IPAddress)" }) -join "; "
-}
-$diag | Format-List | Out-File "C:\Setup\net_status.txt" -Encoding UTF8
-
-# 6. Publish Status to Sunshine apps.json so it is externally visible via API
-$sunshineApps = "C:\Program Files\Sunshine\config\apps.json"
-if (Test-Path $sunshineApps) {
-    try {
-        $json = Get-Content $sunshineApps -Raw | ConvertFrom-Json
-        $statApp = $json.apps | Where-Object { $_.name -like "SystemStatus*" }
-        $statusStr = "SystemStatus [IP: $targetIp | Internet: $(if ($webRes -eq 200) { 'ONLINE' } else { 'OFFLINE' }) | DNS: $dnsRes]"
-        if (-not $statApp) {
-            $json.apps += [PSCustomObject]@{
-                name = $statusStr
-                "image-path" = "desktop.png"
-            }
-        } else {
-            $statApp.name = $statusStr
-        }
-        $json | ConvertTo-Json -Depth 5 | Set-Content $sunshineApps -Encoding UTF8
-    } catch {}
-}
-'@
-[System.IO.File]::WriteAllText("$guestSetupStaging\ensure_static_ip.ps1", $ensureNetScript, [System.Text.UTF8Encoding]::new($true))
 
 # 10. Create guest auto-configuration script (install_guest_tools.ps1)
 Write-Host "[+] Creating guest setup automation script (install_guest_tools.ps1)..." -ForegroundColor Cyan
@@ -399,41 +275,40 @@ powercfg /change standby-timeout-ac 0 2>$null
 powercfg /change hibernate-timeout-ac 0 2>$null
 powercfg -h off 2>$null
 
-# 9. Purge any AntiOS leftovers and deploy tools to Desktop
-Write-Host "[+] Cleaning AntiOS leftovers if any..."
-Get-ChildItem -Path "C:\Users" -Recurse -Filter "*AntiOS*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-Get-ChildItem -Path "C:\Setup" -Filter "*AntiOS*" -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
-
-$desktopTargets = @(
-    "C:\Users\Public\Desktop",
-    "C:\Users\Default\Desktop"
-)
-if (Test-Path "C:\Users\Gamer") {
-    $desktopTargets += "C:\Users\Gamer\Desktop"
-}
-$userDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
-if ($userDesktop -and ($desktopTargets -notcontains $userDesktop)) {
-    $desktopTargets += $userDesktop
+# 9. Deploy strictly 4 initial installers to Public Desktop (ChromeSetup, RealVNC, Winhance, WinRAR)
+Write-Host "[+] Configuring Public Desktop tools (Strict 4 installers, no duplicates)..."
+$publicDesktop = "C:\Users\Public\Desktop"
+if (-not (Test-Path $publicDesktop)) {
+    New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
 }
 
-foreach ($targetDir in $desktopTargets) {
-    if (-not (Test-Path $targetDir)) {
-        New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
+# Clean any existing bat, ps1, or leftovers from Public Desktop
+Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
+
+# Copy exactly the 4 required installers to Public\Desktop only
+if (Test-Path "C:\Setup\desktop_tools") {
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    foreach ($pattern in $allowedPatterns) {
+        Get-ChildItem -Path "C:\Setup\desktop_tools" -Filter $pattern | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
+        }
     }
-    if (Test-Path "C:\Setup\desktop_tools") {
-        Copy-Item -Path "C:\Setup\desktop_tools\*" -Destination $targetDir -Force -ErrorAction SilentlyContinue
+}
+
+# Clean up any copies from Default\Desktop and user Desktops to prevent duplicate icons in Windows Explorer
+$userDesktops = @("C:\Users\Default\Desktop", "C:\Users\Gamer\Desktop")
+$currentDesktop = [System.Environment]::GetFolderPath([System.Environment+SpecialFolder]::Desktop)
+if ($currentDesktop -and ($userDesktops -notcontains $currentDesktop)) {
+    $userDesktops += $currentDesktop
+}
+foreach ($dupDir in $userDesktops) {
+    if (Test-Path $dupDir) {
+        Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
     }
-    if (Test-Path "C:\Setup\Verify-HWID.ps1") {
-        Copy-Item -Path "C:\Setup\Verify-HWID.ps1" -Destination "$targetDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path "C:\Setup\Guest-HyperV-CleanID.ps1") {
-        Copy-Item -Path "C:\Setup\Guest-HyperV-CleanID.ps1" -Destination "$targetDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
-    }
-    $hwidBat = "@echo off`r`ntitle Verify-HWID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Verify-HWID.ps1`"`r`npause`r`n"
-    [System.IO.File]::WriteAllText("$targetDir\Verify-HWID.bat", $hwidBat, [System.Text.Encoding]::ASCII)
-    
-    $cleanBat = "@echo off`r`ntitle Guest-CleanID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Guest-HyperV-CleanID.ps1`"`r`npause`r`n"
-    [System.IO.File]::WriteAllText("$targetDir\Guest-CleanID.bat", $cleanBat, [System.Text.Encoding]::ASCII)
 }
 
 # 10. VolumeID Randomization

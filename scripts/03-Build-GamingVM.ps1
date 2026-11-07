@@ -71,6 +71,8 @@ Start-Sleep -Seconds 2
 
 Write-Host "[*] VHDX attached as Disk Number: $diskNumber" -ForegroundColor Gray
 
+try {
+
 # 4. Partition and Format GPT
 Write-Host "[+] Initializing GPT disk and creating partitions..." -ForegroundColor Green
 Initialize-Disk -Number $diskNumber -PartitionStyle GPT -ErrorAction Stop
@@ -205,30 +207,42 @@ try {
     reg unload HKLM\Offline_SOFTWARE 2>&1 | Out-Null
 }
 
-# 9. Deploy Desktop Tools to Guest Desktop
-Write-Host "[+] Deploying new desktop tools and HWID scripts to Guest Desktop..." -ForegroundColor Green
+# 9. Deploy Desktop Tools to Guest Desktop (Strictly 4 initial installers: ChromeSetup, RealVNC, Winhance, WinRAR)
+Write-Host "[+] Deploying new desktop tools to Guest Public Desktop (Strict 4 installers, no duplicates)..." -ForegroundColor Green
 $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
-$desktopTargets = @(
-    "${winLetter}:\Users\Public\Desktop",
-    "${winLetter}:\Users\Default\Desktop"
-)
-if (Test-Path "${winLetter}:\Users\Gamer") {
-    $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
-}
-foreach ($targetDir in $desktopTargets) {
-    New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
-    if (Test-Path $desktopToolsSource) {
-        Copy-Item -Path "$desktopToolsSource\*" -Destination $targetDir -Force -ErrorAction SilentlyContinue
+$publicDesktop = "${winLetter}:\Users\Public\Desktop"
+New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
+
+# Clean any existing scripts or leftovers from Public Desktop
+Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
+
+# Copy exactly the 4 required installers to Public\Desktop only
+if (Test-Path $desktopToolsSource) {
+    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+    foreach ($pattern in $allowedPatterns) {
+        Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
+        }
     }
-    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$targetDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
-    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$targetDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
-    
-    $hwidBat = "@echo off`r`ntitle Verify-HWID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Verify-HWID.ps1`"`r`npause`r`n"
-    [System.IO.File]::WriteAllText("$targetDir\Verify-HWID.bat", $hwidBat, [System.Text.Encoding]::ASCII)
-    
-    $cleanBat = "@echo off`r`ntitle Guest-CleanID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Guest-HyperV-CleanID.ps1`"`r`npause`r`n"
-    [System.IO.File]::WriteAllText("$targetDir\Guest-CleanID.bat", $cleanBat, [System.Text.Encoding]::ASCII)
 }
+
+# Clean up any copies from Default\Desktop and Gamer\Desktop to prevent duplicate icons in Windows Explorer
+$duplicateTargets = @("${winLetter}:\Users\Default\Desktop", "${winLetter}:\Users\Gamer\Desktop")
+foreach ($dupDir in $duplicateTargets) {
+    if (Test-Path $dupDir) {
+        Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Stage HWID scripts to C:\Setup (NOT to Desktop!)
+$setupDir = "${winLetter}:\Setup"
+New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
+Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
 
 # 10. Inject Unattended Setup XML
 Write-Host "[+] Injecting unattend.xml..." -ForegroundColor Green

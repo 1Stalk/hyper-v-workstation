@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Instantly provisions an additional Gaming VM using Differencing VHDX and GPU-PV with full hardware randomization.
 .DESCRIPTION
@@ -130,29 +130,41 @@ try {
     # Ensure AntiOS is purged
     Get-ChildItem -Path "${winLetter}:\" -Filter "*AntiOS*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 
-    # Ensure new desktop tools and HWID scripts are on Desktops
+    # Ensure desktop tools are present strictly on Public Desktop (Strict 4 installers, no duplicates)
     $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
-    $desktopTargets = @(
-        "${winLetter}:\Users\Public\Desktop",
-        "${winLetter}:\Users\Default\Desktop"
-    )
-    if (Test-Path "${winLetter}:\Users\Gamer") {
-        $desktopTargets += "${winLetter}:\Users\Gamer\Desktop"
-    }
-    foreach ($targetDir in $desktopTargets) {
-        New-Item -ItemType Directory -Path $targetDir -Force -ErrorAction SilentlyContinue | Out-Null
-        if (Test-Path $desktopToolsSource) {
-            Copy-Item -Path "$desktopToolsSource\*" -Destination $targetDir -Force -ErrorAction SilentlyContinue
+    $publicDesktop = "${winLetter}:\Users\Public\Desktop"
+    New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
+
+    # Clean any existing scripts or leftovers from Public Desktop
+    Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
+
+    # Copy exactly the 4 required installers to Public\Desktop only
+    if (Test-Path $desktopToolsSource) {
+        $allowedPatterns = @("ChromeSetup*", "RealVNC*", "Winhance*", "winrar*")
+        foreach ($pattern in $allowedPatterns) {
+            Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
+            }
         }
-        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$targetDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
-        Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$targetDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
-        
-        $hwidBat = "@echo off`r`ntitle Verify-HWID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Verify-HWID.ps1`"`r`npause`r`n"
-        [System.IO.File]::WriteAllText("$targetDir\Verify-HWID.bat", $hwidBat, [System.Text.Encoding]::ASCII)
-        
-        $cleanBat = "@echo off`r`ntitle Guest-CleanID`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"C:\Setup\Guest-HyperV-CleanID.ps1`"`r`npause`r`n"
-        [System.IO.File]::WriteAllText("$targetDir\Guest-CleanID.bat", $cleanBat, [System.Text.Encoding]::ASCII)
     }
+
+    # Clean up any copies from Default\Desktop and Gamer\Desktop to prevent duplicate icons in Windows Explorer
+    $duplicateTargets = @("${winLetter}:\Users\Default\Desktop", "${winLetter}:\Users\Gamer\Desktop")
+    foreach ($dupDir in $duplicateTargets) {
+        if (Test-Path $dupDir) {
+            Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    # Stage HWID scripts to C:\Setup (NOT to Desktop!)
+    $setupDir = "${winLetter}:\Setup"
+    New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
+    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
 
     # Unique MachineGuid and SQM MachineId in offline SOFTWARE hive
     $softwareHive = "${winLetter}:\Windows\System32\config\SOFTWARE"
