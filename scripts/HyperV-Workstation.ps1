@@ -808,7 +808,7 @@ function Show-AddProxyDialog {
         [xml]$dialogXaml = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Добавление SOCKS5 Прокси" Height="430" Width="470"
+        Title="Добавление SOCKS5 Прокси" Height="520" Width="500"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
     <Window.Resources>
@@ -818,7 +818,7 @@ function Show-AddProxyDialog {
             <Setter Property="BorderBrush" Value="#3f3f46"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="Padding" Value="8,5"/>
-            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="FontSize" Value="13"/>
         </Style>
         <Style TargetType="TextBlock">
@@ -837,12 +837,30 @@ function Show-AddProxyDialog {
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0">
+        <!-- Быстрый ввод -->
+        <Border Grid.Row="0" Background="#202024" CornerRadius="6" Padding="10" Margin="0,0,0,12" BorderBrush="#3f3f46" BorderThickness="1">
+            <StackPanel>
+                <TextBlock Text="⚡ Быстрый ввод (domain:port:username:password):" FontWeight="SemiBold" Foreground="#38bdf8" Margin="0,0,0,5"/>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Name="TxtDlgQuickInput" Margin="0,0,8,0" Padding="8,5" Text="" ToolTip="Вставьте строку вида domain:port:username:password"/>
+                    <Button Grid.Column="1" Name="BtnDlgPaste" Content="📋 Вставить" Padding="12,5" Background="#27272a" Foreground="#e4e4e7" BorderBrush="#52525b" Cursor="Hand" FontWeight="SemiBold"/>
+                </Grid>
+                <TextBlock Text="При вводе или вставке строки поля ниже заполняются мгновенно" FontSize="11" Foreground="#71717a" Margin="0,2,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Название профиля -->
+        <StackPanel Grid.Row="1">
             <TextBlock Text="Название профиля:" FontWeight="SemiBold"/>
             <TextBox Name="TxtDlgName" Text="Новый SOCKS5"/>
         </StackPanel>
 
-        <Grid Grid.Row="1">
+        <!-- Хост и Порт -->
+        <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="100"/>
@@ -857,7 +875,8 @@ function Show-AddProxyDialog {
             </StackPanel>
         </Grid>
 
-        <Grid Grid.Row="2">
+        <!-- Логин и Пароль -->
+        <Grid Grid.Row="3">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="*"/>
@@ -872,11 +891,13 @@ function Show-AddProxyDialog {
             </StackPanel>
         </Grid>
 
-        <Border Grid.Row="3" Background="#111113" CornerRadius="6" Padding="10" Margin="0,4,0,14" BorderBrush="#27272a" BorderThickness="1">
-            <TextBlock Name="TxtDlgStatus" Text="💡 Введите данные прокси и нажмите 'Проверить' или 'Сохранить'" FontSize="11" Foreground="#71717a" TextWrapping="Wrap"/>
+        <!-- Статус проверки -->
+        <Border Grid.Row="4" Background="#111113" CornerRadius="6" Padding="10" Margin="0,2,0,12" BorderBrush="#27272a" BorderThickness="1">
+            <TextBlock Name="TxtDlgStatus" Text="💡 Введите данные вручную или вставьте строку domain:port:username:password выше" FontSize="11" Foreground="#71717a" TextWrapping="Wrap"/>
         </Border>
 
-        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+        <!-- Кнопки управления -->
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
             <Button Name="BtnDlgTest" Content="🔍 Проверить" Margin="0,0,8,0" Padding="14,6" Background="#27272a" Foreground="#ffffff" BorderBrush="#3f3f46" Cursor="Hand"/>
             <Button Name="BtnDlgSave" Content="💾 Сохранить" Margin="0,0,8,0" Padding="14,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
             <Button Name="BtnDlgCancel" Content="Отмена" Padding="14,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
@@ -888,15 +909,91 @@ function Show-AddProxyDialog {
         $dlg = [Windows.Markup.XamlReader]::Load($reader)
         $dlg.Owner = $window
 
-        $TxtDlgName   = $dlg.FindName("TxtDlgName")
-        $TxtDlgServer = $dlg.FindName("TxtDlgServer")
-        $TxtDlgPort   = $dlg.FindName("TxtDlgPort")
-        $TxtDlgUser   = $dlg.FindName("TxtDlgUser")
-        $TxtDlgPass   = $dlg.FindName("TxtDlgPass")
-        $TxtDlgStatus = $dlg.FindName("TxtDlgStatus")
-        $BtnDlgTest   = $dlg.FindName("BtnDlgTest")
-        $BtnDlgSave   = $dlg.FindName("BtnDlgSave")
-        $BtnDlgCancel = $dlg.FindName("BtnDlgCancel")
+        $TxtDlgQuickInput = $dlg.FindName("TxtDlgQuickInput")
+        $BtnDlgPaste      = $dlg.FindName("BtnDlgPaste")
+        $TxtDlgName       = $dlg.FindName("TxtDlgName")
+        $TxtDlgServer     = $dlg.FindName("TxtDlgServer")
+        $TxtDlgPort       = $dlg.FindName("TxtDlgPort")
+        $TxtDlgUser       = $dlg.FindName("TxtDlgUser")
+        $TxtDlgPass       = $dlg.FindName("TxtDlgPass")
+        $TxtDlgStatus     = $dlg.FindName("TxtDlgStatus")
+        $BtnDlgTest       = $dlg.FindName("BtnDlgTest")
+        $BtnDlgSave       = $dlg.FindName("BtnDlgSave")
+        $BtnDlgCancel     = $dlg.FindName("BtnDlgCancel")
+
+        $ParseQuickString = {
+            param([string]$raw)
+            if ([string]::IsNullOrWhiteSpace($raw)) { return }
+            $clean = $raw.Trim()
+
+            # Очистка от протокола (socks5://, socks5h://, http://)
+            if ($clean -match '^[a-zA-Z0-9]+://(.*)$') {
+                $clean = $matches[1]
+            }
+
+            # Поддержка формата user:pass@domain:port
+            if ($clean -match '^(.*?):(.*?)@(.*?):(\d+)$') {
+                $TxtDlgUser.Text = $matches[1].Trim()
+                $TxtDlgPass.Text = $matches[2].Trim()
+                $TxtDlgServer.Text = $matches[3].Trim()
+                $TxtDlgPort.Text = $matches[4].Trim()
+                if ($TxtDlgName.Text -eq "Новый SOCKS5" -or [string]::IsNullOrWhiteSpace($TxtDlgName.Text)) {
+                    $TxtDlgName.Text = "SOCKS5 " + $matches[3].Trim()
+                }
+                $TxtDlgStatus.Text = "✅ Распознано: " + $matches[3].Trim() + ":" + $matches[4].Trim() + " (Пользователь: " + $matches[1].Trim() + ")"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+                return
+            }
+
+            # Основной формат: domain:port:username:password или domain:port
+            $parts = $clean -split ':'
+            if ($parts.Count -ge 4) {
+                $TxtDlgServer.Text = $parts[0].Trim()
+                $TxtDlgPort.Text = $parts[1].Trim()
+                $TxtDlgUser.Text = $parts[2].Trim()
+                $TxtDlgPass.Text = ($parts[3..($parts.Count - 1)] -join ':').Trim()
+                if ($TxtDlgName.Text -eq "Новый SOCKS5" -or [string]::IsNullOrWhiteSpace($TxtDlgName.Text)) {
+                    $TxtDlgName.Text = "SOCKS5 " + $parts[0].Trim()
+                }
+                $TxtDlgStatus.Text = "✅ Распознано: " + $parts[0].Trim() + ":" + $parts[1].Trim() + " (Пользователь: " + $parts[2].Trim() + ")"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+            } elseif ($parts.Count -eq 2) {
+                $TxtDlgServer.Text = $parts[0].Trim()
+                $TxtDlgPort.Text = $parts[1].Trim()
+                if ($TxtDlgName.Text -eq "Новый SOCKS5" -or [string]::IsNullOrWhiteSpace($TxtDlgName.Text)) {
+                    $TxtDlgName.Text = "SOCKS5 " + $parts[0].Trim()
+                }
+                $TxtDlgStatus.Text = "✅ Распознано: " + $parts[0].Trim() + ":" + $parts[1].Trim() + " (Без авторизации)"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+            } elseif ($parts.Count -eq 3) {
+                $TxtDlgServer.Text = $parts[0].Trim()
+                $TxtDlgPort.Text = $parts[1].Trim()
+                $TxtDlgUser.Text = $parts[2].Trim()
+                $TxtDlgStatus.Text = "✅ Распознано: " + $parts[0].Trim() + ":" + $parts[1].Trim() + " (Логин: " + $parts[2].Trim() + ")"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+            }
+        }
+
+        # Автоматическое распознавание при вводе в поле быстрого ввода
+        $TxtDlgQuickInput.Add_TextChanged({
+            try {
+                & $ParseQuickString $TxtDlgQuickInput.Text
+            } catch {}
+        })
+
+        # Кнопка вставки из буфера обмена
+        $BtnDlgPaste.Add_Click({
+            try {
+                $clip = [System.Windows.Clipboard]::GetText()
+                if (-not [string]::IsNullOrWhiteSpace($clip)) {
+                    $TxtDlgQuickInput.Text = $clip.Trim()
+                    & $ParseQuickString $clip
+                }
+            } catch {
+                $TxtDlgStatus.Text = "⚠️ Буфер обмена недоступен: $($_.Exception.Message)"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+            }
+        })
 
         $BtnDlgTest.Add_Click({
             $s = $TxtDlgServer.Text.Trim()
@@ -911,7 +1008,7 @@ function Show-AddProxyDialog {
                 return
             }
 
-            $TxtDlgStatus.Text = "⏳ Проверка подключения к $($s):$($p)..."
+            $TxtDlgStatus.Text = "⏳ Проверка подключения к " + $s + ":" + $p + "..."
             $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
             
             try {
