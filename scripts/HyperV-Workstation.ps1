@@ -20,6 +20,7 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
 
 try {
     $showWinDef = '[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow); [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();'
@@ -638,181 +639,541 @@ $BtnOpenStream.Add_Click({
     Write-ConsoleLog "Сеанс Moonlight инициирован."
 })
 
+# --- Modern Dialog Helpers (Pure WPF, Dark Theme, 100% Crash-Proof) ---
+
+function Show-PairMoonlightDialog {
+    param([string]$vmIp, [string]$vmName)
+    try {
+        [xml]$pairXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Связывание Moonlight с Sunshine" Height="240" Width="400"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="16"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Связывание с $vmName ($vmIp)" FontWeight="Bold" FontSize="14" Foreground="#f4f4f5" Margin="0,0,0,6"/>
+        <TextBlock Grid.Row="1" Text="Введите 4-значный PIN-код сопряжения:" FontSize="12" Foreground="#a1a1aa" Margin="0,0,0,10"/>
+        
+        <TextBox Grid.Row="2" Name="TxtPairPin" Text="1234" Margin="0,0,0,16"/>
+
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Button Name="BtnDoPair" Content="🔑 Связать" Margin="0,0,8,0" Padding="16,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
+            <Button Name="BtnCancelPair" Content="Отмена" Padding="14,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($pairXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $TxtPairPin    = $dlg.FindName("TxtPairPin")
+        $BtnDoPair     = $dlg.FindName("BtnDoPair")
+        $BtnCancelPair = $dlg.FindName("BtnCancelPair")
+
+        $script:pairPinResult = $null
+
+        $BtnDoPair.Add_Click({
+            $p = $TxtPairPin.Text.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($p)) {
+                $script:pairPinResult = $p
+                $dlg.DialogResult = $true
+                $dlg.Close()
+            }
+        })
+
+        $BtnCancelPair.Add_Click({
+            $dlg.DialogResult = $false
+            $dlg.Close()
+        })
+
+        $script:pairPinResult = $null
+        $res = $dlg.ShowDialog()
+        if ($res -eq $true -and $script:pairPinResult) {
+            return $script:pairPinResult
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна сопряжения Moonlight: $($_.Exception.Message)"
+    }
+    return $null
+}
+
+function Show-CloneVMDialog {
+    param([string]$defaultName, [string]$defaultIp)
+    try {
+        [xml]$cloneXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Клонирование виртуальной машины" Height="270" Width="400"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#a1a1aa"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="Имя новой виртуальной машины:" FontWeight="SemiBold"/>
+            <TextBox Name="TxtCloneName" Text="$defaultName"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1">
+            <TextBlock Text="Статический IP адрес (сеть 192.168.100.x):" FontWeight="SemiBold"/>
+            <TextBox Name="TxtCloneIp" Text="$defaultIp"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Button Name="BtnDoClone" Content="➕ Создать клон" Margin="0,0,8,0" Padding="16,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
+            <Button Name="BtnCancelClone" Content="Отмена" Padding="14,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($cloneXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $TxtCloneName   = $dlg.FindName("TxtCloneName")
+        $TxtCloneIp     = $dlg.FindName("TxtCloneIp")
+        $BtnDoClone     = $dlg.FindName("BtnDoClone")
+        $BtnCancelClone = $dlg.FindName("BtnCancelClone")
+
+        $script:cloneResult = $null
+
+        $BtnDoClone.Add_Click({
+            $n = $TxtCloneName.Text.Trim()
+            $ip = $TxtCloneIp.Text.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($n) -and -not [string]::IsNullOrWhiteSpace($ip)) {
+                $script:cloneResult = [PSCustomObject]@{ Name = $n; IP = $ip }
+                $dlg.DialogResult = $true
+                $dlg.Close()
+            }
+        })
+
+        $BtnCancelClone.Add_Click({
+            $dlg.DialogResult = $false
+            $dlg.Close()
+        })
+
+        $script:cloneResult = $null
+        $res = $dlg.ShowDialog()
+        if ($res -eq $true -and $script:cloneResult) {
+            return $script:cloneResult
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна клонирования VM: $($_.Exception.Message)"
+    }
+    return $null
+}
+
+function Show-AddProxyDialog {
+    try {
+        [xml]$dialogXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Добавление SOCKS5 Прокси" Height="430" Width="470"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#a1a1aa"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0">
+            <TextBlock Text="Название профиля:" FontWeight="SemiBold"/>
+            <TextBox Name="TxtDlgName" Text="Новый SOCKS5"/>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="100"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="IP адрес / Хост:" FontWeight="SemiBold"/>
+                <TextBox Name="TxtDlgServer" Text=""/>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="Порт:" FontWeight="SemiBold"/>
+                <TextBox Name="TxtDlgPort" Text="1080"/>
+            </StackPanel>
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="Логин (необязательно):"/>
+                <TextBox Name="TxtDlgUser" Text=""/>
+            </StackPanel>
+            <StackPanel Grid.Column="1">
+                <TextBlock Text="Пароль (необязательно):"/>
+                <TextBox Name="TxtDlgPass" Text=""/>
+            </StackPanel>
+        </Grid>
+
+        <Border Grid.Row="3" Background="#111113" CornerRadius="6" Padding="10" Margin="0,4,0,14" BorderBrush="#27272a" BorderThickness="1">
+            <TextBlock Name="TxtDlgStatus" Text="💡 Введите данные прокси и нажмите 'Проверить' или 'Сохранить'" FontSize="11" Foreground="#71717a" TextWrapping="Wrap"/>
+        </Border>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Name="BtnDlgTest" Content="🔍 Проверить" Margin="0,0,8,0" Padding="14,6" Background="#27272a" Foreground="#ffffff" BorderBrush="#3f3f46" Cursor="Hand"/>
+            <Button Name="BtnDlgSave" Content="💾 Сохранить" Margin="0,0,8,0" Padding="14,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
+            <Button Name="BtnDlgCancel" Content="Отмена" Padding="14,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($dialogXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $TxtDlgName   = $dlg.FindName("TxtDlgName")
+        $TxtDlgServer = $dlg.FindName("TxtDlgServer")
+        $TxtDlgPort   = $dlg.FindName("TxtDlgPort")
+        $TxtDlgUser   = $dlg.FindName("TxtDlgUser")
+        $TxtDlgPass   = $dlg.FindName("TxtDlgPass")
+        $TxtDlgStatus = $dlg.FindName("TxtDlgStatus")
+        $BtnDlgTest   = $dlg.FindName("BtnDlgTest")
+        $BtnDlgSave   = $dlg.FindName("BtnDlgSave")
+        $BtnDlgCancel = $dlg.FindName("BtnDlgCancel")
+
+        $BtnDlgTest.Add_Click({
+            $s = $TxtDlgServer.Text.Trim()
+            $p = 1080
+            [int]::TryParse($TxtDlgPort.Text.Trim(), [ref]$p) | Out-Null
+            $u = $TxtDlgUser.Text.Trim()
+            $pw = $TxtDlgPass.Text.Trim()
+
+            if ([string]::IsNullOrWhiteSpace($s)) {
+                $TxtDlgStatus.Text = "⚠️ Укажите IP адрес или хост сервера!"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+                return
+            }
+
+            $TxtDlgStatus.Text = "⏳ Проверка подключения к $($s):$($p)..."
+            $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
+            
+            try {
+                $testRes = Test-ProxyEndpoint -Server $s -Port $p -Username $u -Password $pw -TimeoutSec 5
+                if ($testRes.Success) {
+                    $TxtDlgStatus.Text = "🟢 Успешно! Exit IP: $($testRes.IP) ($($testRes.Country), $($testRes.City)), Пинг: $($testRes.LatencyMs) мс"
+                    $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+                } else {
+                    $TxtDlgStatus.Text = "🔴 Ошибка подключения: $($testRes.Error)"
+                    $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f87171")
+                }
+            } catch {
+                $TxtDlgStatus.Text = "🔴 Ошибка теста: $($_.Exception.Message)"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f87171")
+            }
+        })
+
+        $BtnDlgSave.Add_Click({
+            $s = $TxtDlgServer.Text.Trim()
+            $p = 1080
+            [int]::TryParse($TxtDlgPort.Text.Trim(), [ref]$p) | Out-Null
+            $n = $TxtDlgName.Text.Trim()
+            if ([string]::IsNullOrWhiteSpace($n)) { $n = "SOCKS5 Proxy" }
+            $u = $TxtDlgUser.Text.Trim()
+            $pw = $TxtDlgPass.Text.Trim()
+
+            if ([string]::IsNullOrWhiteSpace($s)) {
+                $TxtDlgStatus.Text = "⚠️ Укажите IP адрес или хост сервера!"
+                $TxtDlgStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+                return
+            }
+
+            $script:savedProfileResult = [PSCustomObject]@{
+                name = $n
+                server = $s
+                port = $p
+                username = $u
+                password = $pw
+            }
+            $dlg.DialogResult = $true
+            $dlg.Close()
+        })
+
+        $BtnDlgCancel.Add_Click({
+            $dlg.DialogResult = $false
+            $dlg.Close()
+        })
+
+        $script:savedProfileResult = $null
+        $res = $dlg.ShowDialog()
+        if ($res -eq $true -and $script:savedProfileResult) {
+            return $script:savedProfileResult
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна добавления прокси: $($_.Exception.Message)"
+    }
+    return $null
+}
+
+# --- Action Event Handlers ---
+
 $BtnPairMoonlight.Add_Click({
-    $sel = $ListVMs.SelectedItem
-    if (-not $sel) { return }
-
-    $pin = [Microsoft.VisualBasic.Interaction]::InputBox("Введите 4-значный PIN код для связывания Moonlight с Sunshine (например, 1234):", "Связывание Moonlight", "1234")
-    if ([string]::IsNullOrWhiteSpace($pin)) { return }
-
-    Write-ConsoleLog "Связывание Moonlight с хостом $($sel.IP) с PIN: $pin..."
-    
-    # 1. Start Moonlight pairing process in background
     try {
-        Start-Process -FilePath $MoonlightExe -ArgumentList "pair $($sel.IP) --pin $pin"
-        Start-Sleep -Seconds 2
-    } catch {
-        Write-ConsoleLog "[!] Ошибка запуска Moonlight: $($_.Exception.Message)"
-    }
-
-    # 2. Submit PIN to Sunshine Web API on guest
-    try {
-        $pairUrl = "https://$($sel.IP):47990/api/pin"
-        $pairHeader = @{
-            Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin1234"))
+        $sel = $ListVMs.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для связывания.", "Связывание Moonlight", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
         }
 
-        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
-        $pending = Invoke-RestMethod -Uri $pairUrl -Method Get -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue
-        if ($pending -and $pending.pairings -and $pending.pairings.Count -gt 0) {
-            $pId = $pending.pairings[0].id
-            $devName = $pending.pairings[0].name
-            $body = @{
-                pairing_id = $pId
-                pin = $pin
-                name = $devName
-            } | ConvertTo-Json
-            Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
-            Write-ConsoleLog "[+] PIN успешно подтвержден в Sunshine API для устройства '$devName'."
-        } else {
-            # Direct PIN submission fallback
-            $body = @{ pin = $pin } | ConvertTo-Json
-            Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
-            Write-ConsoleLog "[+] Запрос PIN отправлен в Sunshine API."
-        }
-    } catch {
-        Write-ConsoleLog "[!] Замечание при передаче PIN через API: $($_.Exception.Message)"
-    }
+        $pin = Show-PairMoonlightDialog -vmIp $sel.IP -vmName $sel.Name
+        if ([string]::IsNullOrWhiteSpace($pin)) { return }
 
-    Write-ConsoleLog "Команда сопряжения Moonlight завершена."
+        Write-ConsoleLog "Связывание Moonlight с хостом $($sel.IP) с PIN: $pin..."
+        
+        # 1. Start Moonlight pairing process in background
+        try {
+            Start-Process -FilePath $MoonlightExe -ArgumentList "pair $($sel.IP) --pin $pin"
+            Start-Sleep -Seconds 2
+        } catch {
+            Write-ConsoleLog "[!] Ошибка запуска Moonlight: $($_.Exception.Message)"
+        }
+
+        # 2. Submit PIN to Sunshine Web API on guest
+        try {
+            $pairUrl = "https://$($sel.IP):47990/api/pin"
+            $pairHeader = @{
+                Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin1234"))
+            }
+
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+            $pending = Invoke-RestMethod -Uri $pairUrl -Method Get -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue
+            if ($pending -and $pending.pairings -and $pending.pairings.Count -gt 0) {
+                $pId = $pending.pairings[0].id
+                $devName = $pending.pairings[0].name
+                $body = @{
+                    pairing_id = $pId
+                    pin = $pin
+                    name = $devName
+                } | ConvertTo-Json
+                Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+                Write-ConsoleLog "[+] PIN успешно подтвержден в Sunshine API для устройства '$devName'."
+            } else {
+                # Direct PIN submission fallback
+                $body = @{ pin = $pin } | ConvertTo-Json
+                Invoke-RestMethod -Uri $pairUrl -Method Post -Body $body -ContentType "application/json" -Headers $pairHeader -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+                Write-ConsoleLog "[+] Запрос PIN отправлен в Sunshine API."
+            }
+        } catch {
+            Write-ConsoleLog "[!] Замечание при передаче PIN через API: $($_.Exception.Message)"
+        }
+
+        Write-ConsoleLog "Команда сопряжения Moonlight завершена."
+    } catch {
+        Write-ConsoleLog "[!] Ошибка в обработчике сопряжения Moonlight: $($_.Exception.Message)"
+    }
 })
 
 $BtnVMConnect.Add_Click({
-    $sel = $ListVMs.SelectedItem
-    if ($sel) {
-        Start-Process "vmconnect.exe" -ArgumentList "localhost `"$($sel.Name)`""
-    } else {
-        Start-Process "virtmgmt.msc"
+    try {
+        $sel = $ListVMs.SelectedItem
+        if ($sel) {
+            Start-Process "vmconnect.exe" -ArgumentList "localhost `"$($sel.Name)`""
+        } else {
+            Start-Process "virtmgmt.msc"
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка запуска vmconnect: $($_.Exception.Message)"
     }
 })
 
 $BtnRandomizeHWID.Add_Click({
-    $sel = $ListVMs.SelectedItem
-    if (-not $sel) {
-        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для рандомизации HWID.", "Спуфинг HWID", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
-        return
+    try {
+        $sel = $ListVMs.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для рандомизации HWID.", "Спуфинг HWID", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
+        }
+        $vm = Get-VM -Name $sel.Name -ErrorAction SilentlyContinue
+        if ($vm -and $vm.State -ne 'Off') {
+            $ans = [System.Windows.MessageBox]::Show("ВМ '$($sel.Name)' в данный момент работает.`n`nДля безопасной модификации SMBIOS, SCSI Disk Identifier и сетевого MAC адреса ВМ должна быть выключена.`n`nВыключить ВМ и выполнить спуфинг HWID?", "Требуется остановка ВМ", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+            if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+            Write-ConsoleLog "Остановка ВМ '$($sel.Name)'..."
+            Stop-VM -Name $sel.Name -TurnOff -Force
+            Start-Sleep -Seconds 2
+        }
+        Write-ConsoleLog "Запуск спуфинга и аппаратной рандомизации для '$($sel.Name)'..."
+        $randScript = Join-Path $PSScriptRoot "Host-HyperV-Randomize.ps1"
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$randScript`" -VMName `"$($sel.Name)`"" -Wait
+        Write-ConsoleLog "Аппаратный профиль '$($sel.Name)' успешно рандомизирован!"
+        Refresh-VMList
+    } catch {
+        Write-ConsoleLog "[!] Ошибка при спуфинге HWID: $($_.Exception.Message)"
     }
-    $vm = Get-VM -Name $sel.Name -ErrorAction SilentlyContinue
-    if ($vm -and $vm.State -ne 'Off') {
-        $ans = [System.Windows.MessageBox]::Show("ВМ '$($sel.Name)' в данный момент работает.`n`nДля безопасной модификации SMBIOS, SCSI Disk Identifier и сетевого MAC адреса ВМ должна быть выключена.`n`nВыключить ВМ и выполнить спуфинг HWID?", "Требуется остановка ВМ", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
-        if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
-        Write-ConsoleLog "Остановка ВМ '$($sel.Name)'..."
-        Stop-VM -Name $sel.Name -TurnOff -Force
-        Start-Sleep -Seconds 2
-    }
-    Write-ConsoleLog "Запуск спуфинга и аппаратной рандомизации для '$($sel.Name)'..."
-    $randScript = "C:\Users\server1\Desktop\Hyper-V\scripts\Host-HyperV-Randomize.ps1"
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$randScript`" -VMName `"$($sel.Name)`"" -Wait
-    Write-ConsoleLog "Аппаратный профиль '$($sel.Name)' успешно рандомизирован!"
-    Refresh-VMList
 })
 
 $BtnCloneVM.Add_Click({
-    $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Gaming-*" }
-    $nextNum = $allVMs.Count + 1
-    $defaultNewName = "Gaming-VM$nextNum"
-    $defaultNewIP = "192.168.100.$(10 + $nextNum)"
+    try {
+        $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Gaming-*" }
+        $nextNum = $allVMs.Count + 1
+        $defaultNewName = "Gaming-VM$nextNum"
+        $defaultNewIP = "192.168.100.$(10 + $nextNum)"
 
-    $newName = [Microsoft.VisualBasic.Interaction]::InputBox("Введите имя новой виртуальной машины:", "Клонирование VM", $defaultNewName)
-    if ([string]::IsNullOrWhiteSpace($newName)) { return }
+        $cloneData = Show-CloneVMDialog -defaultName $defaultNewName -defaultIp $defaultNewIP
+        if (-not $cloneData) { return }
 
-    $newIP = [Microsoft.VisualBasic.Interaction]::InputBox("Введите IP адрес для новой VM ($newName):", "Настройка сетевого IP", $defaultNewIP)
-    if ([string]::IsNullOrWhiteSpace($newIP)) { return }
+        $newName = $cloneData.Name
+        $newIP = $cloneData.IP
 
-    Write-ConsoleLog "Клонирование новой VM '$newName' с IP $newIP..."
-    
-    $cloneScript = "C:\Users\server1\Desktop\Hyper-V\scripts\05-Clone-VM.ps1"
-    $args = "-NewVMName `"$newName`" -NewGuestIP `"$newIP`""
-    
-    Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$cloneScript`" $args" -Wait
-    
-    Write-ConsoleLog "Клонирование завершено!"
-    Refresh-VMList
+        Write-ConsoleLog "Клонирование новой VM '$newName' с IP $newIP..."
+        
+        $cloneScript = Join-Path $PSScriptRoot "05-Clone-VM.ps1"
+        $args = "-NewVMName `"$newName`" -NewGuestIP `"$newIP`""
+        
+        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$cloneScript`" $args" -Wait
+        
+        Write-ConsoleLog "Клонирование завершено!"
+        Refresh-VMList
+    } catch {
+        Write-ConsoleLog "[!] Ошибка при клонировании VM: $($_.Exception.Message)"
+    }
 })
 
 # SOCKS5 Proxy Events
 $BtnApplyProxy.Add_Click({
-    $sel = $ListVMs.SelectedItem
-    if (-not $sel) {
-        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для настройки прокси.", "SOCKS5 Прокси", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
-        return
-    }
-
-    $isProxy = ($CmbProxyMode.SelectedIndex -eq 1)
-    $profileId = if ($CmbProxyProfiles.SelectedItem) { $CmbProxyProfiles.SelectedItem.Tag } else { "proxy-1" }
-
-    Write-ConsoleLog "Применение сетевой маршрутизации для $($sel.Name)..."
     try {
+        $sel = $ListVMs.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для настройки прокси.", "SOCKS5 Прокси", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
+        }
+
+        $isProxy = ($CmbProxyMode.SelectedIndex -eq 1)
+        $profileId = if ($CmbProxyProfiles.SelectedItem) { $CmbProxyProfiles.SelectedItem.Tag } else { "proxy-1" }
+
+        Write-ConsoleLog "Применение сетевой маршрутизации для $($sel.Name)..."
         Set-VMProxyRouting -VMName $sel.Name -Enabled $isProxy -ProfileId $profileId
         if ($isProxy) {
             Write-ConsoleLog "SOCKS5 Прокси [$profileId] успешно активирован для $($sel.Name)! Прямой NAT отключен (Kill-Switch активен)."
         } else {
             Write-ConsoleLog "Прокси отключен для $($sel.Name). Восстановлен прямой Интернет (IP Хоста)."
         }
+        Update-SelectedVMDetails
     } catch {
-        Write-ConsoleLog "Ошибка применения прокси: $($_.Exception.Message)"
+        Write-ConsoleLog "[!] Ошибка применения прокси: $($_.Exception.Message)"
     }
-    Update-SelectedVMDetails
 })
 
 $BtnTestProxy.Add_Click({
-    $selItem = $CmbProxyProfiles.SelectedItem
-    if (-not $selItem) { return }
-    $profId = $selItem.Tag
-    $cfg = Get-ProxyConfig
-    $prof = $cfg.profiles | Where-Object { $_.id -eq $profId } | Select-Object -First 1
-    if (-not $prof) { return }
+    try {
+        $selItem = $CmbProxyProfiles.SelectedItem
+        if (-not $selItem) { return }
+        $profId = $selItem.Tag
+        $cfg = Get-ProxyConfig
+        $prof = $cfg.profiles | Where-Object { $_.id -eq $profId } | Select-Object -First 1
+        if (-not $prof) { return }
 
-    Write-ConsoleLog "Тестирование прокси '$($prof.name)' ($($prof.server):$($prof.port))..."
-    $res = Test-ProxyEndpoint -Server $prof.server -Port $prof.port -Username $prof.username -Password $prof.password
-    if ($res.Success) {
-        Write-ConsoleLog "Результат теста: УСПЕХ! Внешний IP: $($res.IP) ($($res.Country), $($res.City)), Пинг: $($res.LatencyMs) мс"
-    } else {
-        Write-ConsoleLog "Результат теста: ОШИБКА ($($res.Error))"
+        Write-ConsoleLog "Тестирование прокси '$($prof.name)' ($($prof.server):$($prof.port))..."
+        $res = Test-ProxyEndpoint -Server $prof.server -Port $prof.port -Username $prof.username -Password $prof.password
+        if ($res.Success) {
+            Write-ConsoleLog "Результат теста: УСПЕХ! Внешний IP: $($res.IP) ($($res.Country), $($res.City)), Пинг: $($res.LatencyMs) мс"
+        } else {
+            Write-ConsoleLog "Результат теста: ОШИБКА ($($res.Error))"
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка тестирования прокси: $($_.Exception.Message)"
     }
 })
 
 $BtnAddProxy.Add_Click({
-    $pName = [Microsoft.VisualBasic.Interaction]::InputBox("Введите название нового профиля прокси:", "Новый SOCKS5", "My SOCKS5 Proxy")
-    if ([string]::IsNullOrWhiteSpace($pName)) { return }
+    try {
+        $newProxy = Show-AddProxyDialog
+        if (-not $newProxy) { return }
 
-    $pServer = [Microsoft.VisualBasic.Interaction]::InputBox("Введите IP адрес или хост SOCKS5 сервера:", "Хост прокси", "")
-    if ([string]::IsNullOrWhiteSpace($pServer)) { return }
+        $cfg = Get-ProxyConfig
+        $newId = "proxy-" + ($cfg.profiles.Count + 1)
+        $newProf = [PSCustomObject]@{
+            id = $newId
+            name = $newProxy.name
+            server = $newProxy.server
+            port = $newProxy.port
+            username = $newProxy.username
+            password = $newProxy.password
+            country = "Custom"
+            city = "Custom"
+            isp = "Custom"
+        }
+        $cfg.profiles += $newProf
+        Save-ProxyConfig $cfg
+        Refresh-ProxyProfilesUI
 
-    $pPortStr = [Microsoft.VisualBasic.Interaction]::InputBox("Введите порт SOCKS5 сервера:", "Порт", "1080")
-    [int]$pPort = 1080
-    [int]::TryParse($pPortStr, [ref]$pPort) | Out-Null
+        # Select the newly added profile in combo box
+        for ($i = 0; $i -lt $CmbProxyProfiles.Items.Count; $i++) {
+            if ($CmbProxyProfiles.Items[$i].Tag -eq $newId) {
+                $CmbProxyProfiles.SelectedIndex = $i
+                break
+            }
+        }
 
-    $pUser = [Microsoft.VisualBasic.Interaction]::InputBox("Введите логин (оставьте пустым если без авторизации):", "Логин", "")
-    $pPass = [Microsoft.VisualBasic.Interaction]::InputBox("Введите пароль:", "Пароль", "")
-
-    $cfg = Get-ProxyConfig
-    $newId = "proxy-" + ($cfg.profiles.Count + 1)
-    $newProf = [PSCustomObject]@{
-        id = $newId
-        name = $pName
-        server = $pServer.Trim()
-        port = $pPort
-        username = $pUser.Trim()
-        password = $pPass.Trim()
-        country = "Unknown"
-        city = "Custom"
-        isp = "Custom"
+        Write-ConsoleLog "Профиль '$($newProxy.name)' ($($newProxy.server):$($newProxy.port)) успешно добавлен!"
+    } catch {
+        Write-ConsoleLog "[!] Ошибка при добавлении прокси: $($_.Exception.Message)"
     }
-    $cfg.profiles += $newProf
-    Save-ProxyConfig $cfg
-    Refresh-ProxyProfilesUI
-    Write-ConsoleLog "Профиль '$pName' успешно добавлен!"
 })
 
 # Auto-refresh timer every 3 seconds
