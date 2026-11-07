@@ -296,7 +296,11 @@ $chosenOUI = $vendorOUIList | Get-Random
 $nicHex = 1..3 | ForEach-Object { "{0:X2}" -f (Get-Random -Min 0 -Max 256) }
 $randomMac = "$chosenOUI$($nicHex -join '')"
 Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
-Set-VMNetworkAdapter -VMName $VMName -StaticMacAddress $randomMac -MacAddressSpoofing On
+$gamingNic = Get-VMNetworkAdapter -VMName $VMName | Where-Object { $_.Name -ne "Internet" } | Select-Object -First 1
+if ($gamingNic) {
+    Set-VMNetworkAdapter -VMNetworkAdapter $gamingNic -StaticMacAddress $randomMac -MacAddressSpoofing On
+    Write-Host "    -> Vendor MAC assigned to Gaming Adapter: $randomMac" -ForegroundColor Gray
+}
 
 # 9. Attach GPU Partition Adapter
 Write-Host "[+] Allocating GPU-PV Partition ($VRAMUnits units VRAM)..." -ForegroundColor Green

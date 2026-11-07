@@ -169,11 +169,16 @@ try {
         }
     }
 
-    # Stage HWID scripts to C:\Setup (NOT to Desktop!)
+    # Stage HWID scripts and Network Watchdog to C:\Setup (NOT to Desktop!)
     $setupDir = "${winLetter}:\Setup"
     New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
     Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
     Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+    $watchdogSource = "C:\Users\server1\Desktop\Hyper-V\staging\guest_setup\ensure_static_ip.ps1"
+    if (-not (Test-Path $watchdogSource)) { $watchdogSource = "C:\Users\server1\Desktop\Hyper-V\staging\ensure_static_ip.ps1" }
+    if (Test-Path $watchdogSource) {
+        Copy-Item -Path $watchdogSource -Destination "$setupDir\ensure_static_ip.ps1" -Force -ErrorAction SilentlyContinue
+    }
 
     # Unique MachineGuid and SQM MachineId in offline SOFTWARE hive
     $softwareHive = "${winLetter}:\Windows\System32\config\SOFTWARE"
@@ -190,11 +195,13 @@ try {
             Set-ItemProperty -Path $sqmKey -Name "MachineId" -Value $newSqmGuid -Force
             Write-Host "    -> Generated unique MachineGuid: $newGuid" -ForegroundColor Gray
 
-            # Re-register RunOnce for Guest Tools initialization on clone boot
+            # Re-register RunOnce for Guest Tools initialization and watchdog task
             $runOnceKey = "HKLM:\Clone_SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce"
             if (-not (Test-Path $runOnceKey)) { New-Item -Path $runOnceKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            $watchdogCmd = 'powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -Command "$act = New-ScheduledTaskAction -Execute ''powershell.exe'' -Argument ''-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Setup\ensure_static_ip.ps1''; $tb = New-ScheduledTaskTrigger -AtStartup; $tr = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1); Register-ScheduledTask -TaskName ''Ensure-GamingNetwork'' -Action $act -Trigger @($tb, $tr) -Principal (New-ScheduledTaskPrincipal -UserId ''SYSTEM'' -LogonType ServiceAccount -RunLevel Highest) -Force; & powershell.exe -ExecutionPolicy Bypass -File C:\Setup\ensure_static_ip.ps1"'
+            Set-ItemProperty -Path $runOnceKey -Name "RegisterNetworkWatchdog" -Value $watchdogCmd -Force -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $runOnceKey -Name "InstallGuestTools" -Value "powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Setup\install_guest_tools.ps1" -Force -ErrorAction SilentlyContinue
-            Write-Host "    -> Re-registered RunOnce guest initialization" -ForegroundColor Gray
+            Write-Host "    -> Re-registered RunOnce guest initialization and network watchdog" -ForegroundColor Gray
         } finally {
             [GC]::Collect()
             [GC]::WaitForPendingFinalizers()
@@ -220,7 +227,11 @@ try {
             if (-not (Test-Path $tcpKey)) { New-Item -Path $tcpKey -Force -ErrorAction SilentlyContinue | Out-Null }
             Set-ItemProperty -Path $tcpKey -Name "Hostname" -Value $NewVMName -Force -ErrorAction SilentlyContinue
             Set-ItemProperty -Path $tcpKey -Name "NV Hostname" -Value $NewVMName -Force -ErrorAction SilentlyContinue
-            Write-Host "    -> Configured unique ComputerName and Hostname: $NewVMName" -ForegroundColor Gray
+
+            $lsaKey = "HKLM:\Clone_SYSTEM\ControlSet001\Control\Lsa"
+            if (-not (Test-Path $lsaKey)) { New-Item -Path $lsaKey -Force -ErrorAction SilentlyContinue | Out-Null }
+            Set-ItemProperty -Path $lsaKey -Name "LimitBlankPasswordUse" -Value 0 -Type DWord -Force -ErrorAction SilentlyContinue
+            Write-Host "    -> Configured unique ComputerName and Hostname: $NewVMName (and LimitBlankPasswordUse = 0)" -ForegroundColor Gray
         } finally {
             [GC]::Collect()
             [GC]::WaitForPendingFinalizers()
@@ -334,7 +345,11 @@ $chosenOUI = $vendorOUIList | Get-Random
 $nicHex = 1..3 | ForEach-Object { "{0:X2}" -f (Get-Random -Min 0 -Max 256) }
 $randomMac = "$chosenOUI$($nicHex -join '')"
 Write-Host "    -> Vendor MAC assigned: $randomMac" -ForegroundColor Gray
-Set-VMNetworkAdapter -VMName $NewVMName -StaticMacAddress $randomMac -MacAddressSpoofing On
+$gamingNic = Get-VMNetworkAdapter -VMName $NewVMName | Where-Object { $_.Name -ne "Internet" } | Select-Object -First 1
+if ($gamingNic) {
+    Set-VMNetworkAdapter -VMNetworkAdapter $gamingNic -StaticMacAddress $randomMac -MacAddressSpoofing On
+    Write-Host "    -> Vendor MAC assigned to Gaming Adapter: $randomMac" -ForegroundColor Gray
+}
 
 # 9. Attach GPU Partition Adapter
 Write-Host "[+] Allocating GPU-PV Partition ($VRAMUnits units VRAM)..." -ForegroundColor Green
