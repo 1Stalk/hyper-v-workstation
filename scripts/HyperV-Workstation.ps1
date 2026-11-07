@@ -500,8 +500,11 @@ function Refresh-ProxyProfilesUI {
 }
 
 function Update-SelectedVMDetails {
+    param([bool]$ForceControlsUpdate = $false)
+
     $sel = $ListVMs.SelectedItem
     if (-not $sel) {
+        $script:LastSelectedVMForProxy = $null
         $TxtVMTitle.Text = "Выберите виртуальную машину"
         $TxtVMSub.Text = "Нет активного выбора"
         $TxtStatusBadge.Text = "НЕТ ВЫБОРА"
@@ -534,22 +537,13 @@ function Update-SelectedVMDetails {
     if (Get-Command Get-VMProxyState -ErrorAction SilentlyContinue) {
         $proxyState = Get-VMProxyState -VMName $sel.Name
         if ($proxyState.Enabled) {
-            $CmbProxyMode.SelectedIndex = 1
             $TxtProxyStatus.Text = "$($proxyState.ProfileName) ($($proxyState.Server))"
             $BadgeProxyStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#14532d")
             $TxtProxyStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
             $TxtKillSwitch.Text = "🛡️ Kill-Switch: АКТИВЕН"
             $BadgeKillSwitch.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#14532d")
             $TxtKillSwitch.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
-
-            for ($i = 0; $i -lt $CmbProxyProfiles.Items.Count; $i++) {
-                if ($CmbProxyProfiles.Items[$i].Tag -eq $proxyState.ProfileId) {
-                    $CmbProxyProfiles.SelectedIndex = $i
-                    break
-                }
-            }
         } else {
-            $CmbProxyMode.SelectedIndex = 0
             $TxtProxyStatus.Text = "Прямой Интернет (IP Хоста)"
             $BadgeProxyStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
             $TxtProxyStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#a1a1aa")
@@ -557,12 +551,31 @@ function Update-SelectedVMDetails {
             $BadgeKillSwitch.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
             $TxtKillSwitch.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#a1a1aa")
         }
+
+        # CRITICAL: Only update user input controls (ComboBoxes) when selection changed or explicitly forced.
+        # This prevents the 3-second background timer from resetting user's selection while they are configuring mode!
+        $vmChanged = ($script:LastSelectedVMForProxy -ne $sel.Name)
+        if ($ForceControlsUpdate -or $vmChanged) {
+            $script:LastSelectedVMForProxy = $sel.Name
+
+            if ($proxyState.Enabled) {
+                $CmbProxyMode.SelectedIndex = 1
+                for ($i = 0; $i -lt $CmbProxyProfiles.Items.Count; $i++) {
+                    if ($CmbProxyProfiles.Items[$i].Tag -eq $proxyState.ProfileId) {
+                        $CmbProxyProfiles.SelectedIndex = $i
+                        break
+                    }
+                }
+            } else {
+                $CmbProxyMode.SelectedIndex = 0
+            }
+        }
     }
 }
 
 # Events
 $ListVMs.Add_SelectionChanged({
-    Update-SelectedVMDetails
+    Update-SelectedVMDetails -ForceControlsUpdate $true
 })
 
 $BtnRefresh.Add_Click({
@@ -1301,7 +1314,7 @@ function Show-ProxyListDialog {
                         }
 
                         Refresh-ProxyProfilesUI
-                        Update-SelectedVMDetails
+                        Update-SelectedVMDetails -ForceControlsUpdate $true
                         & $RenderList
                     } catch {
                         Write-ConsoleLog "[!] Ошибка удаления прокси: $($_.Exception.Message)"
@@ -1502,7 +1515,7 @@ $BtnApplyProxy.Add_Click({
         } else {
             Write-ConsoleLog "Прокси отключен для $($sel.Name). Восстановлен прямой Интернет (IP Хоста)."
         }
-        Update-SelectedVMDetails
+        Update-SelectedVMDetails -ForceControlsUpdate $true
     } catch {
         Write-ConsoleLog "[!] Ошибка применения прокси: $($_.Exception.Message)"
     }
