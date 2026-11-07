@@ -296,7 +296,8 @@ try {
 
                             <Button Name="BtnApplyProxy" Content="⚡ Применить" Style="{StaticResource PrimaryButton}" Margin="0,0,6,0" Padding="12,5"/>
                             <Button Name="BtnTestProxy" Content="🔍 Проверить" Margin="0,0,6,0" Padding="12,5"/>
-                            <Button Name="BtnAddProxy" Content="➕ Добавить" Margin="0" Padding="10,5"/>
+                            <Button Name="BtnAddProxy" Content="➕ Добавить" Margin="0,0,6,0" Padding="10,5"/>
+                            <Button Name="BtnListProxy" Content="📋 Список" Margin="0" Padding="10,5"/>
                         </WrapPanel>
                     </Grid>
                 </Border>
@@ -387,6 +388,7 @@ $CmbProxyProfiles = $window.FindName("CmbProxyProfiles")
 $BtnApplyProxy    = $window.FindName("BtnApplyProxy")
 $BtnTestProxy     = $window.FindName("BtnTestProxy")
 $BtnAddProxy      = $window.FindName("BtnAddProxy")
+$BtnListProxy     = $window.FindName("BtnListProxy")
 $TxtProxyStatus   = $window.FindName("TxtProxyStatus")
 $BadgeProxyStatus = $window.FindName("BadgeProxyStatus")
 $TxtKillSwitch    = $window.FindName("TxtKillSwitch")
@@ -1068,6 +1070,296 @@ function Show-AddProxyDialog {
     return $null
 }
 
+function Show-ProxyListDialog {
+    try {
+        [xml]$dialogXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Список сохранённых SOCKS5 Прокси" Height="500" Width="720"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock Text="📋 Сохранённые SOCKS5 Прокси" FontSize="16" FontWeight="Bold" Foreground="#ffffff"/>
+                <TextBlock Text="Управление сохранёнными профилями. При удалении активного прокси привязанная виртуалка будет безопасно переведена на прямое подключение." FontSize="11" Foreground="#71717a" Margin="0,3,0,0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Scrollable Cards List -->
+        <Border Grid.Row="1" Background="#131316" CornerRadius="8" BorderBrush="#2e2e33" BorderThickness="1" Padding="8">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Name="PnlProxyCards"/>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Footer Controls -->
+        <Grid Grid.Row="2" Margin="0,12,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Name="BtnListAdd" Content="➕ Добавить новый прокси" Padding="14,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="SemiBold" Cursor="Hand"/>
+            <Button Grid.Column="2" Name="BtnListClose" Content="Закрыть" Padding="16,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+        </Grid>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($dialogXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $PnlProxyCards = $dlg.FindName("PnlProxyCards")
+        $BtnListAdd    = $dlg.FindName("BtnListAdd")
+        $BtnListClose  = $dlg.FindName("BtnListClose")
+
+        $RenderList = {
+            $PnlProxyCards.Children.Clear()
+            $cfg = Get-ProxyConfig
+            if (-not $cfg.profiles -or $cfg.profiles.Count -eq 0) {
+                $emptyTb = New-Object System.Windows.Controls.TextBlock
+                $emptyTb.Text = "Нет сохранённых профилей. Нажмите '➕ Добавить новый прокси', чтобы добавить сервер."
+                $emptyTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#71717a")
+                $emptyTb.FontSize = 12
+                $emptyTb.Margin = [System.Windows.Thickness]::new(10, 20, 10, 10)
+                $emptyTb.HorizontalAlignment = [System.Windows.HorizontalAlignment]::Center
+                [void]$PnlProxyCards.Children.Add($emptyTb)
+                return
+            }
+
+            foreach ($p in $cfg.profiles) {
+                # Determine active VM bindings
+                $activeVMs = @()
+                if ($cfg.assignments) {
+                    foreach ($prop in $cfg.assignments.PSObject.Properties) {
+                        if ($prop.Value.enabled -and $prop.Value.profileId -eq $p.id) {
+                            $activeVMs += $prop.Name
+                        }
+                    }
+                }
+
+                $border = New-Object System.Windows.Controls.Border
+                $border.CornerRadius = [System.Windows.CornerRadius]::new(6)
+                $border.Padding = [System.Windows.Thickness]::new(12, 8, 12, 8)
+                $border.Margin = [System.Windows.Thickness]::new(0, 0, 0, 6)
+                $border.BorderThickness = [System.Windows.Thickness]::new(1)
+                if ($activeVMs.Count -gt 0) {
+                    $border.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#18261e")
+                    $border.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#059669")
+                } else {
+                    $border.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#1f1f23")
+                    $border.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#2e2e33")
+                }
+
+                $grid = New-Object System.Windows.Controls.Grid
+                $col0 = New-Object System.Windows.Controls.ColumnDefinition
+                $col0.Width = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star)
+                $col1 = New-Object System.Windows.Controls.ColumnDefinition
+                $col1.Width = [System.Windows.GridLength]::Auto
+                $grid.ColumnDefinitions.Add($col0)
+                $grid.ColumnDefinitions.Add($col1)
+
+                # Info Column
+                $infoPnl = New-Object System.Windows.Controls.StackPanel
+                $infoPnl.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+                $titleRow = New-Object System.Windows.Controls.StackPanel
+                $titleRow.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+
+                $nameTb = New-Object System.Windows.Controls.TextBlock
+                $nameTb.Text = $p.name
+                $nameTb.FontWeight = [System.Windows.FontWeights]::Bold
+                $nameTb.FontSize = 13
+                $nameTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f4f4f5")
+                $titleRow.Children.Add($nameTb)
+
+                $badge = New-Object System.Windows.Controls.Border
+                $badge.CornerRadius = [System.Windows.CornerRadius]::new(4)
+                $badge.Padding = [System.Windows.Thickness]::new(6, 1, 6, 1)
+                $badge.Margin = [System.Windows.Thickness]::new(8, 0, 0, 0)
+                $badgeTb = New-Object System.Windows.Controls.TextBlock
+                $badgeTb.FontSize = 10
+                $badgeTb.FontWeight = [System.Windows.FontWeights]::SemiBold
+
+                if ($activeVMs.Count -gt 0) {
+                    $badge.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#064e3b")
+                    $badgeTb.Text = "🔒 АКТИВЕН: " + ($activeVMs -join ", ")
+                    $badgeTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#34d399")
+                } else {
+                    $badge.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
+                    $badgeTb.Text = "Не привязан"
+                    $badgeTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#71717a")
+                }
+                $badge.Child = $badgeTb
+                $titleRow.Children.Add($badge)
+                $infoPnl.Children.Add($titleRow)
+
+                # Endpoint details
+                $subTb = New-Object System.Windows.Controls.TextBlock
+                $authText = if ($p.username) { "Пользователь: $($p.username)" } else { "Без авторизации" }
+                $geoText = if ($p.country -and $p.country -ne "Custom") { " • $($p.country) $($p.city)" } else { "" }
+                $subTb.Text = "$($p.server):$($p.port) • $authText$geoText"
+                $subTb.FontSize = 11
+                $subTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#a1a1aa")
+                $subTb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0)
+                $infoPnl.Children.Add($subTb)
+
+                # Test Status TextBlock (dynamically updated on test)
+                $statusTb = New-Object System.Windows.Controls.TextBlock
+                $statusTb.FontSize = 11
+                $statusTb.Margin = [System.Windows.Thickness]::new(0, 2, 0, 0)
+                $statusTb.Visibility = [System.Windows.Visibility]::Collapsed
+                $infoPnl.Children.Add($statusTb)
+
+                [System.Windows.Controls.Grid]::SetColumn($infoPnl, 0)
+                $grid.Children.Add($infoPnl)
+
+                # Action Buttons Column
+                $btnPnl = New-Object System.Windows.Controls.StackPanel
+                $btnPnl.Orientation = [System.Windows.Controls.Orientation]::Horizontal
+                $btnPnl.VerticalAlignment = [System.Windows.VerticalAlignment]::Center
+
+                # Test Button
+                $btnTest = New-Object System.Windows.Controls.Button
+                $btnTest.Content = "🔍 Проверить"
+                $btnTest.Padding = [System.Windows.Thickness]::new(8, 4, 8, 4)
+                $btnTest.Margin = [System.Windows.Thickness]::new(0, 0, 6, 0)
+                $btnTest.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#27272a")
+                $btnTest.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#e4e4e7")
+                $btnTest.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#3f3f46")
+                $btnTest.Cursor = [System.Windows.Input.Cursors]::Hand
+                $btnTest.Tag = [PSCustomObject]@{ Profile = $p; StatusBlock = $statusTb }
+
+                $btnTest.Add_Click({
+                    $tagObj = $this.Tag
+                    $targetP = $tagObj.Profile
+                    $targetTb = $tagObj.StatusBlock
+                    $targetTb.Visibility = [System.Windows.Visibility]::Visible
+                    $targetTb.Text = "⏳ Проверка $($targetP.server):$($targetP.port)..."
+                    $targetTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
+                    
+                    try {
+                        $res = Test-ProxyEndpoint -Server $targetP.server -Port $targetP.port -Username $targetP.username -Password $targetP.password -TimeoutSec 5
+                        if ($res.Success) {
+                            $targetTb.Text = "🟢 OK! IP: $($res.IP) ($($res.Country), $($res.City)), Пинг: $($res.LatencyMs) мс"
+                            $targetTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#4ade80")
+                        } else {
+                            $targetTb.Text = "🔴 Ошибка: $($res.Error)"
+                            $targetTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f87171")
+                        }
+                    } catch {
+                        $targetTb.Text = "🔴 Сбой теста: $($_.Exception.Message)"
+                        $targetTb.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f87171")
+                    }
+                })
+                $btnPnl.Children.Add($btnTest)
+
+                # Delete Button
+                $btnDel = New-Object System.Windows.Controls.Button
+                $btnDel.Content = "❌ Удалить"
+                $btnDel.Padding = [System.Windows.Thickness]::new(10, 4, 10, 4)
+                $btnDel.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#450a0a")
+                $btnDel.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#fca5a5")
+                $btnDel.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#991b1b")
+                $btnDel.Cursor = [System.Windows.Input.Cursors]::Hand
+                $btnDel.FontWeight = [System.Windows.FontWeights]::SemiBold
+                $btnDel.Tag = [PSCustomObject]@{ Profile = $p; ActiveVMs = $activeVMs }
+
+                $btnDel.Add_Click({
+                    try {
+                        $tagObj = $this.Tag
+                        $delP = $tagObj.Profile
+                        $delActiveVMs = $tagObj.ActiveVMs
+
+                        if ($delActiveVMs -and $delActiveVMs.Count -gt 0) {
+                            $msg = "Прокси '$($delP.name)' в данный момент АКТИВЕН для виртуальной машины: $($delActiveVMs -join ', ')!`n`nПри удалении прокси будет отключен, а виртуалка будет немедленно переведена на прямое подключение хоста (Kill-Switch будет снят).`n`nВы действительно хотите удалить этот прокси?"
+                            $ans = [System.Windows.MessageBox]::Show($msg, "Удаление активного прокси", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+                            if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+                        } else {
+                            $msg = "Удалить профиль прокси '$($delP.name)' ($($delP.server):$($delP.port))?"
+                            $ans = [System.Windows.MessageBox]::Show($msg, "Удаление прокси", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+                            if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+                        }
+
+                        Write-ConsoleLog "Удаление профиля '$($delP.name)' ($($delP.id))..."
+                        $rmRes = Remove-ProxyProfile -ProfileId $delP.id
+                        if ($rmRes -and $rmRes.Success) {
+                            Write-ConsoleLog "Профиль '$($delP.name)' успешно удален!"
+                            if ($rmRes.UnboundVMs.Count -gt 0) {
+                                Write-ConsoleLog "Виртуальные машины [$($rmRes.UnboundVMs -join ', ')] переведены на прямое интернет-соединение хоста."
+                            }
+                        } else {
+                            Write-ConsoleLog "Профиль '$($delP.name)' удален из списка."
+                        }
+
+                        Refresh-ProxyProfilesUI
+                        Update-SelectedVMDetails
+                        & $RenderList
+                    } catch {
+                        Write-ConsoleLog "[!] Ошибка удаления прокси: $($_.Exception.Message)"
+                        [System.Windows.MessageBox]::Show("Ошибка удаления прокси: $($_.Exception.Message)", "Ошибка", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+                    }
+                })
+                $btnPnl.Children.Add($btnDel)
+
+                [System.Windows.Controls.Grid]::SetColumn($btnPnl, 1)
+                $grid.Children.Add($btnPnl)
+
+                $border.Child = $grid
+                [void]$PnlProxyCards.Children.Add($border)
+            }
+        }
+
+        # Initial Render
+        & $RenderList
+
+        # Add Button in Dialog
+        $BtnListAdd.Add_Click({
+            try {
+                $newProxy = Show-AddProxyDialog
+                if ($newProxy) {
+                    $cfg = Get-ProxyConfig
+                    $newId = "proxy-" + ($cfg.profiles.Count + 1)
+                    $newProf = [PSCustomObject]@{
+                        id = $newId
+                        name = $newProxy.name
+                        server = $newProxy.server
+                        port = $newProxy.port
+                        username = $newProxy.username
+                        password = $newProxy.password
+                        country = "Custom"
+                        city = "Custom"
+                        isp = "Custom"
+                    }
+                    $cfg.profiles += $newProf
+                    Save-ProxyConfig $cfg
+                    Refresh-ProxyProfilesUI
+                    Write-ConsoleLog "Профиль '$($newProxy.name)' ($($newProxy.server):$($newProxy.port)) успешно добавлен!"
+                    & $RenderList
+                }
+            } catch {
+                Write-ConsoleLog "[!] Ошибка при добавлении прокси: $($_.Exception.Message)"
+            }
+        })
+
+        $BtnListClose.Add_Click({
+            $dlg.Close()
+        })
+
+        $dlg.ShowDialog() | Out-Null
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна списка прокси: $($_.Exception.Message)"
+    }
+}
+
 # --- Action Event Handlers ---
 
 $BtnPairMoonlight.Add_Click({
@@ -1270,6 +1562,14 @@ $BtnAddProxy.Add_Click({
         Write-ConsoleLog "Профиль '$($newProxy.name)' ($($newProxy.server):$($newProxy.port)) успешно добавлен!"
     } catch {
         Write-ConsoleLog "[!] Ошибка при добавлении прокси: $($_.Exception.Message)"
+    }
+})
+
+$BtnListProxy.Add_Click({
+    try {
+        Show-ProxyListDialog
+    } catch {
+        Write-ConsoleLog "[!] Ошибка открытия списка прокси: $($_.Exception.Message)"
     }
 })
 

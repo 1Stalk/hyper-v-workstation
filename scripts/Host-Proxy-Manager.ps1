@@ -509,7 +509,58 @@ function Get-VMProxyState {
     return $res
 }
 
+function Remove-ProxyProfile {
+    param(
+        [Parameter(Mandatory=$true)][string]$ProfileId
+    )
+
+    $cfg = Get-ProxyConfig
+    $targetProf = $cfg.profiles | Where-Object { $_.id -eq $ProfileId } | Select-Object -First 1
+    if (-not $targetProf) { return $null }
+
+    $unboundVMs = @()
+
+    # 1. Safely unbind and restore direct internet on any VM currently using this profile
+    if ($cfg.assignments) {
+        foreach ($prop in $cfg.assignments.PSObject.Properties) {
+            $vmName = $prop.Name
+            $assign = $prop.Value
+            if ($assign.profileId -eq $ProfileId) {
+                if ($assign.enabled) {
+                    Write-Host "[*] Profile '$ProfileId' is active on $vmName. Switching $vmName to direct internet..." -ForegroundColor Yellow
+                    Set-VMProxyRouting -VMName $vmName -Enabled $false
+                    $unboundVMs += $vmName
+                } else {
+                    $assign.profileId = $null
+                }
+            }
+        }
+    }
+
+    # 2. Reload config (in case Set-VMProxyRouting modified it), remove profile, clear lingering references and save
+    $cfg = Get-ProxyConfig
+    $cfg.profiles = @($cfg.profiles | Where-Object { $_.id -ne $ProfileId })
+    if ($cfg.assignments) {
+        foreach ($prop in $cfg.assignments.PSObject.Properties) {
+            if ($prop.Value.profileId -eq $ProfileId) {
+                $prop.Value.profileId = $null
+                $prop.Value.enabled = $false
+            }
+        }
+    }
+    Save-ProxyConfig $cfg
+
+    # 3. Reload sing-box engine with updated config
+    Start-ProxyEngine
+
+    return [PSCustomObject]@{
+        Success = $true
+        Profile = $targetProf
+        UnboundVMs = $unboundVMs
+    }
+}
+
 if ($MyInvocation.MyCommand.CommandType -eq 'Script' -and $ExecutionContext.SessionState.Module) {
     Export-ModuleMember -Function Get-ProxyConfig, Save-ProxyConfig, Test-ProxyEndpoint, Build-SingBoxConfig, `
-                                Start-ProxyEngine, Stop-ProxyEngine, Set-VMProxyRouting, Get-VMProxyState -ErrorAction SilentlyContinue
+                                Start-ProxyEngine, Stop-ProxyEngine, Set-VMProxyRouting, Get-VMProxyState, Remove-ProxyProfile -ErrorAction SilentlyContinue
 }
