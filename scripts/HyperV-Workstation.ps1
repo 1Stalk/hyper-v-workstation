@@ -1472,7 +1472,14 @@ $BtnRandomizeHWID.Add_Click({
 $BtnCloneVM.Add_Click({
     try {
         $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Gaming-*" }
-        $nextNum = $allVMs.Count + 1
+        $existingNums = @()
+        foreach ($v in $allVMs) {
+            if ($v.Name -match '^Gaming-VM(\d+)$') {
+                $existingNums += [int]$Matches[1]
+            }
+        }
+        $nextNum = 1
+        while ($nextNum -in $existingNums) { $nextNum++ }
         $defaultNewName = "Gaming-VM$nextNum"
         $defaultNewIP = "192.168.100.$(10 + $nextNum)"
 
@@ -1481,18 +1488,29 @@ $BtnCloneVM.Add_Click({
 
         $newName = $cloneData.Name
         $newIP = $cloneData.IP
+        $targetVhd = "C:\Hyper-V\VMs\$newName.vhdx"
 
-        Write-ConsoleLog "Клонирование новой VM '$newName' с IP $newIP..."
+        Write-ConsoleLog "Запуск процесса клонирования VM '$newName' (IP: $newIP, Диск: $targetVhd)..."
         
         $cloneScript = Join-Path $PSScriptRoot "05-Clone-VM.ps1"
-        $args = "-NewVMName `"$newName`" -NewGuestIP `"$newIP`""
+        $cmd = "& '$cloneScript' -NewVMName '$newName' -NewVHDPath '$targetVhd' -NewGuestIP '$newIP'"
+        $fullArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"$cmd; if (`$LASTEXITCODE -ne 0) { Write-Host '`n[!] Ошибка выполнения! Нажмите любую клавишу для закрытия...' -ForegroundColor Red; `$null = `$Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') }`""
         
-        Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$cloneScript`" $args" -Wait
+        $proc = Start-Process powershell.exe -ArgumentList $fullArgs -Wait -PassThru
         
-        Write-ConsoleLog "Клонирование завершено!"
-        Refresh-VMList
+        if ($proc.ExitCode -eq 0) {
+            Write-ConsoleLog "Клонирование успешно завершено! Создана VM '$newName'."
+            Refresh-VMList
+            $newItem = $ListVMs.Items | Where-Object { $_.Name -eq $newName } | Select-Object -First 1
+            if ($newItem) {
+                $ListVMs.SelectedItem = $newItem
+            }
+        } else {
+            Write-ConsoleLog "[!] Ошибка: процесс клонирования VM завершился с кодом $($proc.ExitCode)."
+            [System.Windows.MessageBox]::Show("Произошла ошибка при клонировании виртуальной машины '$newName' (код $($proc.ExitCode)).`nПроверьте детали в консольном окне.", "Ошибка клонирования", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+        }
     } catch {
-        Write-ConsoleLog "[!] Ошибка при клонировании VM: $($_.Exception.Message)"
+        Write-ConsoleLog "[!] Ошибка при вызове клонирования VM: $($_.Exception.Message)"
     }
 })
 

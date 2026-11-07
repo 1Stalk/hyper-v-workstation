@@ -13,9 +13,9 @@
 [CmdletBinding()]
 param(
     [string]$MasterVHDPath = "C:\Hyper-V\VMs\Gaming-Base.vhdx",
-    [string]$NewVMName = "Gaming-VM2",
-    [string]$NewVHDPath = "C:\Hyper-V\VMs\Gaming-VM2.vhdx",
-    [string]$NewGuestIP = "192.168.100.12",
+    [string]$NewVMName = "Gaming-VM3",
+    [string]$NewVHDPath = "",
+    [string]$NewGuestIP = "192.168.100.13",
     [string]$SwitchName = "VM-Gaming-Switch",
     [int]$CPUCount = 4,
     [int64]$MemoryBytes = 8GB,
@@ -45,9 +45,17 @@ if (-not (Test-Path $MasterVHDPath)) {
 }
 Write-Host "[*] Master VHDX resolved: $MasterVHDPath" -ForegroundColor Gray
 
-# Stop master VM if currently running to ensure clean differencing disk state
+# Resolve NewVHDPath dynamically if not explicitly specified
+if ([string]::IsNullOrWhiteSpace($NewVHDPath)) {
+    $vhdFolder = Split-Path -Path $MasterVHDPath -Parent
+    if (-not $vhdFolder -or -not (Test-Path $vhdFolder)) { $vhdFolder = "C:\Hyper-V\VMs" }
+    $NewVHDPath = Join-Path $vhdFolder "$NewVMName.vhdx"
+}
+Write-Host "[*] Target VHDX path: $NewVHDPath" -ForegroundColor Gray
+
+# Stop master VM if currently running to ensure clean differencing disk state (only if master is not golden base)
 $masterVM = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.HardDrives.Path -contains $MasterVHDPath } | Select-Object -First 1
-if ($masterVM -and $masterVM.State -ne 'Off') {
+if ($masterVM -and $masterVM.State -ne 'Off' -and $MasterVHDPath -notlike "*Gaming-Base.vhdx*") {
     Write-Host "[!] Master VM '$($masterVM.Name)' is currently running. Stopping it cleanly before cloning..." -ForegroundColor Yellow
     Stop-VM -Name $masterVM.Name -TurnOff -Force
     Start-Sleep -Seconds 3
