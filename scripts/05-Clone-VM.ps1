@@ -353,4 +353,26 @@ Set-VMGpuPartitionAdapter -VMName $NewVMName `
     -MaxPartitionEncode 18446744073709551615 `
     -OptimalPartitionEncode 18446744073709551615
 
+# 10. Register IP mapping in proxy-profiles.json
+try {
+    $proxyManagerPath = Join-Path $PSScriptRoot "Host-Proxy-Manager.ps1"
+    if (Test-Path $proxyManagerPath) {
+        . $proxyManagerPath
+        $cfg = Get-ProxyConfig
+        if ($cfg) {
+            if (-not $cfg.assignments) {
+                $cfg | Add-Member -MemberType NoteProperty -Name "assignments" -Value ([PSCustomObject]@{}) -Force
+            }
+            if (-not $cfg.assignments.$NewVMName) {
+                $newAssign = [PSCustomObject]@{ enabled = $false; profileId = $null; ip = $NewGuestIP }
+                $cfg.assignments | Add-Member -MemberType NoteProperty -Name $NewVMName -Value $newAssign -Force
+                Save-ProxyConfig $cfg
+                Build-SingBoxConfig
+            }
+        }
+    }
+} catch {
+    Write-Warning "    [!] Notice: Failed to register proxy mapping: $_"
+}
+
 Write-Host "=== Successfully provisioned $NewVMName in under 30 seconds! ===" -ForegroundColor Green

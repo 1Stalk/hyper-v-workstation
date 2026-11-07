@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Host-HyperV-Randomize.ps1 - Hardware spoofing and identifier randomizer for Hyper-V GPU-PV VMs.
     Specifically designed for Windows 11 24H2 / 25H2 environments.
@@ -166,6 +166,9 @@ if ($CycleGpuPV) {
     $gpuAdapters = Get-VMGpuPartitionAdapter -VMName $VMName -ErrorAction SilentlyContinue
     if ($gpuAdapters) {
         $hostInstancePath = $gpuAdapters[0].InstancePath
+        if (-not $PSBoundParameters.ContainsKey('VRAMUnits') -and $gpuAdapters[0].MaxPartitionVRAM) {
+            $VRAMUnits = $gpuAdapters[0].MaxPartitionVRAM
+        }
         Remove-VMGpuPartitionAdapter -VMName $VMName
         Start-Sleep -Milliseconds 500
         if ($hostInstancePath) {

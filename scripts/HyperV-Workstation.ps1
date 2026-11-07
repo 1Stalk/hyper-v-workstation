@@ -137,6 +137,18 @@ try {
                 <!-- VM ListBox -->
                 <ListBox Grid.Row="1" Name="ListVMs" Background="Transparent" BorderThickness="0"
                          Foreground="#e4e4e7" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ContextMenu>
+                        <ContextMenu Background="#1f1f23" Foreground="#f4f4f5" BorderBrush="#3f3f46">
+                            <MenuItem Name="CtxStartVM" Header="▶ Запустить VM"/>
+                            <MenuItem Name="CtxStopVM" Header="⏹ Остановить VM"/>
+                            <Separator Background="#3f3f46"/>
+                            <MenuItem Name="CtxEditVM" Header="⚙️ Настройки оборудования..."/>
+                            <MenuItem Name="CtxRenameVM" Header="✏️ Переименовать..."/>
+                            <MenuItem Name="CtxRandomizeHWID" Header="🎲 Спуфинг HWID..."/>
+                            <Separator Background="#3f3f46"/>
+                            <MenuItem Name="CtxOpenStream" Header="🖥️ Открыть окно (Moonlight)"/>
+                        </ContextMenu>
+                    </ListBox.ContextMenu>
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <Border Background="#1f1f23" CornerRadius="8" Padding="10,8" Margin="0,0,0,6" BorderBrush="#2e2e33" BorderThickness="1">
@@ -183,7 +195,10 @@ try {
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
-                        <TextBlock Name="TxtVMTitle" Text="Выберите виртуальную машину" FontSize="22" FontWeight="Bold" Foreground="#f4f4f5"/>
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Name="TxtVMTitle" Text="Выберите виртуальную машину" FontSize="22" FontWeight="Bold" Foreground="#f4f4f5"/>
+                            <Button Name="BtnRenameVM" Content="✏️ Переименовать" Margin="14,0,0,0" Padding="8,3" FontSize="11" Background="#27272a" Foreground="#e4e4e7" BorderBrush="#3f3f46" Cursor="Hand" VerticalAlignment="Center"/>
+                        </StackPanel>
                         <TextBlock Name="TxtVMSub" Text="Параметры и потоковое управление" FontSize="13" Foreground="#a1a1aa" Margin="0,4,0,0"/>
                     </StackPanel>
                     <Border Grid.Column="1" Name="BadgeStatus" CornerRadius="12" Padding="12,4" Background="#27272a" VerticalAlignment="Center">
@@ -193,14 +208,15 @@ try {
             </Border>
 
             <!-- Controls Toolbar -->
-            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,16">
+            <WrapPanel Grid.Row="1" Margin="0,0,0,16">
                 <Button Name="BtnStartVM" Content="▶ Запустить VM" Style="{StaticResource SuccessButton}" Width="130"/>
                 <Button Name="BtnStopVM" Content="⏹ Остановить" Style="{StaticResource DangerButton}" Width="120"/>
                 <Button Name="BtnOpenStream" Content="🖥️ Открыть окно (Moonlight)" Style="{StaticResource PrimaryButton}" Padding="16,7"/>
                 <Button Name="BtnPairMoonlight" Content="🔑 Связать Moonlight"/>
+                <Button Name="BtnEditVM" Content="⚙️ Настройки ВМ" Style="{StaticResource PrimaryButton}"/>
                 <Button Name="BtnRandomizeHWID" Content="🎲 Спуфинг HWID"/>
                 <Button Name="BtnVMConnect" Content="⚙️ Hyper-V Manager"/>
-            </StackPanel>
+            </WrapPanel>
 
             <!-- Detail Cards -->
             <Grid Grid.Row="2">
@@ -213,38 +229,70 @@ try {
                 <UniformGrid Grid.Row="0" Columns="4" Margin="0,0,0,12">
                     <!-- CPU Card -->
                     <Border Background="#1f1f23" CornerRadius="8" Padding="12" Margin="4" BorderBrush="#2e2e33" BorderThickness="1">
-                        <StackPanel>
-                            <TextBlock Text="ПРОЦЕССОР" FontSize="10" FontWeight="Bold" Foreground="#71717a"/>
-                            <TextBlock Name="TxtCPU" Text="-" FontSize="18" FontWeight="Bold" Foreground="#f4f4f5" Margin="0,4,0,0"/>
-                            <TextBlock Text="vCPU (VT-x/EPT)" FontSize="10" Foreground="#a1a1aa"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <TextBlock Text="ПРОЦЕССОР" FontSize="10" FontWeight="Bold" Foreground="#71717a" VerticalAlignment="Center"/>
+                                <Button Name="BtnEditCPU" Content="✏️ Изменить" HorizontalAlignment="Right" Padding="6,2" Margin="0" FontSize="10" Background="#27272a" Foreground="#38bdf8" BorderBrush="#3f3f46" BorderThickness="1" Cursor="Hand" ToolTip="Изменить количество ядер CPU"/>
+                            </Grid>
+                            <TextBlock Grid.Row="1" Name="TxtCPU" Text="-" FontSize="18" FontWeight="Bold" Foreground="#f4f4f5" Margin="0,4,0,0"/>
+                            <TextBlock Grid.Row="2" Text="vCPU (VT-x/EPT)" FontSize="10" Foreground="#a1a1aa"/>
+                        </Grid>
                     </Border>
 
                     <!-- RAM Card -->
                     <Border Background="#1f1f23" CornerRadius="8" Padding="12" Margin="4" BorderBrush="#2e2e33" BorderThickness="1">
-                        <StackPanel>
-                            <TextBlock Text="ОПЕРАТИВНАЯ ПАМЯТЬ" FontSize="10" FontWeight="Bold" Foreground="#71717a"/>
-                            <TextBlock Name="TxtRAM" Text="-" FontSize="18" FontWeight="Bold" Foreground="#f4f4f5" Margin="0,4,0,0"/>
-                            <TextBlock Text="Статическая ECC" FontSize="10" Foreground="#a1a1aa"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <TextBlock Text="ОПЕРАТИВНАЯ ПАМЯТЬ" FontSize="10" FontWeight="Bold" Foreground="#71717a" VerticalAlignment="Center"/>
+                                <Button Name="BtnEditRAM" Content="✏️ Изменить" HorizontalAlignment="Right" Padding="6,2" Margin="0" FontSize="10" Background="#27272a" Foreground="#38bdf8" BorderBrush="#3f3f46" BorderThickness="1" Cursor="Hand" ToolTip="Изменить объем оперативной памяти"/>
+                            </Grid>
+                            <TextBlock Grid.Row="1" Name="TxtRAM" Text="-" FontSize="18" FontWeight="Bold" Foreground="#f4f4f5" Margin="0,4,0,0"/>
+                            <TextBlock Grid.Row="2" Text="Статическая ECC" FontSize="10" Foreground="#a1a1aa"/>
+                        </Grid>
                     </Border>
 
                     <!-- GPU VRAM Card -->
                     <Border Background="#1f1f23" CornerRadius="8" Padding="12" Margin="4" BorderBrush="#2e2e33" BorderThickness="1">
-                        <StackPanel>
-                            <TextBlock Text="GPU-PV ВИДЕОПАМЯТЬ" FontSize="10" FontWeight="Bold" Foreground="#71717a"/>
-                            <TextBlock Name="TxtVRAM" Text="-" FontSize="18" FontWeight="Bold" Foreground="#38bdf8" Margin="0,4,0,0"/>
-                            <TextBlock Text="NVIDIA GTX 1050 Ti" FontSize="10" Foreground="#a1a1aa"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <TextBlock Text="GPU-PV ВИДЕОПАМЯТЬ" FontSize="10" FontWeight="Bold" Foreground="#71717a" VerticalAlignment="Center"/>
+                                <Button Name="BtnEditVRAM" Content="✏️ Изменить" HorizontalAlignment="Right" Padding="6,2" Margin="0" FontSize="10" Background="#27272a" Foreground="#38bdf8" BorderBrush="#3f3f46" BorderThickness="1" Cursor="Hand" ToolTip="Изменить видеопамять GPU-PV"/>
+                            </Grid>
+                            <TextBlock Grid.Row="1" Name="TxtVRAM" Text="-" FontSize="18" FontWeight="Bold" Foreground="#38bdf8" Margin="0,4,0,0"/>
+                            <TextBlock Grid.Row="2" Text="NVIDIA GTX 1050 Ti" FontSize="10" Foreground="#a1a1aa"/>
+                        </Grid>
                     </Border>
 
                     <!-- Network IP Card -->
                     <Border Background="#1f1f23" CornerRadius="8" Padding="12" Margin="4" BorderBrush="#2e2e33" BorderThickness="1">
-                        <StackPanel>
-                            <TextBlock Text="IP АДРЕС СЕТИ NAT" FontSize="10" FontWeight="Bold" Foreground="#71717a"/>
-                            <TextBlock Name="TxtIP" Text="-" FontSize="16" FontWeight="Bold" Foreground="#4ade80" Margin="0,4,0,0"/>
-                            <TextBlock Text="VM-Gaming-Switch" FontSize="10" Foreground="#a1a1aa"/>
-                        </StackPanel>
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid Grid.Row="0">
+                                <TextBlock Text="IP АДРЕС СЕТИ NAT" FontSize="10" FontWeight="Bold" Foreground="#71717a" VerticalAlignment="Center"/>
+                                <Button Name="BtnEditIP" Content="✏️ Изменить" HorizontalAlignment="Right" Padding="6,2" Margin="0" FontSize="10" Background="#27272a" Foreground="#4ade80" BorderBrush="#3f3f46" BorderThickness="1" Cursor="Hand" ToolTip="Изменить статический IP адрес NAT"/>
+                            </Grid>
+                            <TextBlock Grid.Row="1" Name="TxtIP" Text="-" FontSize="16" FontWeight="Bold" Foreground="#4ade80" Margin="0,4,0,0"/>
+                            <TextBlock Grid.Row="2" Text="VM-Gaming-Switch" FontSize="10" Foreground="#a1a1aa"/>
+                        </Grid>
                     </Border>
                 </UniformGrid>
 
@@ -369,6 +417,21 @@ $BtnOpenStream    = $window.FindName("BtnOpenStream")
 $BtnPairMoonlight = $window.FindName("BtnPairMoonlight")
 $BtnRandomizeHWID = $window.FindName("BtnRandomizeHWID")
 $BtnVMConnect     = $window.FindName("BtnVMConnect")
+$BtnEditVM        = $window.FindName("BtnEditVM")
+$BtnRenameVM      = $window.FindName("BtnRenameVM")
+$BtnEditCPU       = $window.FindName("BtnEditCPU")
+$BtnEditRAM       = $window.FindName("BtnEditRAM")
+$BtnEditVRAM      = $window.FindName("BtnEditVRAM")
+$BtnEditIP        = $window.FindName("BtnEditIP")
+
+# Context Menu Items
+$CtxStartVM       = $window.FindName("CtxStartVM")
+$CtxStopVM        = $window.FindName("CtxStopVM")
+$CtxEditVM        = $window.FindName("CtxEditVM")
+$CtxRenameVM      = $window.FindName("CtxRenameVM")
+$CtxRandomizeHWID = $window.FindName("CtxRandomizeHWID")
+$CtxOpenStream    = $window.FindName("CtxOpenStream")
+
 $TxtVMTitle       = $window.FindName("TxtVMTitle")
 $TxtVMSub         = $window.FindName("TxtVMSub")
 $TxtStatusBadge   = $window.FindName("TxtStatusBadge")
@@ -408,25 +471,49 @@ function Write-ConsoleLog([string]$msg) {
 }
 
 function Get-VMIPAddress([string]$vmName) {
-    # 1. Try query live IP from Hyper-V NetworkAdapters first
+    # 1. Try query live IP from Hyper-V NetworkAdapters first if VM is running
     try {
         $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
-        $ip = ($vm.NetworkAdapters.IPAddresses | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notlike '169.254.*' })[0]
-        if ($ip) { return $ip }
+        if ($vm -and $vm.State -eq 'Running') {
+            $ip = ($vm.NetworkAdapters.IPAddresses | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notlike '169.254.*' -and $_ -like '192.168.100.*' })[0]
+            if ($ip) { return $ip }
+        }
     } catch {}
 
-    # 2. Check if VM has static IP mapped in table
+    # 2. Check if VM has static IP mapped in proxy config assignments
+    if (Get-Command Get-ProxyConfig -ErrorAction SilentlyContinue) {
+        try {
+            $cfg = Get-ProxyConfig
+            if ($cfg -and $cfg.assignments) {
+                $assign = $cfg.assignments.$vmName
+                if ($assign -and $assign.ip) {
+                    return $assign.ip
+                }
+            }
+        } catch {}
+    }
+
+    # 3. Check if VM has static IP mapped in table
     $ipMap = @{
         "Gaming-VM1" = "192.168.100.11"
         "Gaming-VM2" = "192.168.100.12"
         "Gaming-VM3" = "192.168.100.13"
         "Gaming-VM4" = "192.168.100.14"
         "Gaming-VM5" = "192.168.100.15"
+        "Gaming-VM6" = "192.168.100.16"
     }
     if ($ipMap.ContainsKey($vmName)) {
         return $ipMap[$vmName]
     }
+    if ($Script:VMIPMap -and $Script:VMIPMap.ContainsKey($vmName)) {
+        return $Script:VMIPMap[$vmName]
+    }
     
+    # 4. Fallback from VM name number Gaming-VM<N>
+    if ($vmName -match '^Gaming-VM(\d+)$') {
+        return "192.168.100.$(10 + [int]$Matches[1])"
+    }
+
     return "192.168.100.11"
 }
 
@@ -436,7 +523,17 @@ function Refresh-VMList {
         $currentSelectionName = $ListVMs.SelectedItem.Name
     }
 
-    $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Gaming-*" }
+    $cfg = if (Get-Command Get-ProxyConfig -ErrorAction SilentlyContinue) { Get-ProxyConfig } else { $null }
+    $assignedNames = @()
+    if ($cfg -and $cfg.assignments) {
+        $assignedNames = @($cfg.assignments.PSObject.Properties.Name)
+    }
+
+    $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { 
+        $_.Name -like "Gaming-*" -or 
+        $_.Name -in $assignedNames -or
+        (Get-VMNetworkAdapter -VMName $_.Name -ErrorAction SilentlyContinue | Where-Object { $_.SwitchName -eq "VM-Gaming-Switch" })
+    }
     $items = [System.Collections.ArrayList]::new()
 
     foreach ($vm in $allVMs) {
@@ -816,6 +913,569 @@ function Show-CloneVMDialog {
         Write-ConsoleLog "[!] Ошибка окна клонирования VM: $($_.Exception.Message)"
     }
     return $null
+}
+
+function Show-RenameVMDialog {
+    param([string]$targetVMName)
+    try {
+        if (-not $targetVMName) { return $null }
+
+        [xml]$renameXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Переименование виртуальной машины" Height="260" Width="430"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,6"/>
+            <Setter Property="FontSize" Value="14"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="✏️ Переименование виртуальной машины" FontWeight="Bold" FontSize="15" Foreground="#f4f4f5" Margin="0,0,0,6"/>
+        <TextBlock Grid.Row="1" Text="Текущее имя: $targetVMName" FontSize="12" Foreground="#a1a1aa" Margin="0,0,0,10"/>
+        
+        <StackPanel Grid.Row="2" Margin="0,0,0,6">
+            <TextBlock Text="Новое имя виртуальной машины:" FontSize="12" FontWeight="SemiBold" Foreground="#e4e4e7" Margin="0,0,0,4"/>
+            <TextBox Name="TxtNewVMName" Text="$targetVMName"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="3" Name="TxtRenameStatus" Text="Имя будет обновлено в Hyper-V, proxy-profiles.json и гостевой системе." FontSize="11" Foreground="#71717a" TextWrapping="Wrap" Margin="0,2,0,10"/>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Bottom">
+            <Button Name="BtnDoRename" Content="✏️ Переименовать" IsDefault="True" Margin="0,0,8,0" Padding="16,6" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
+            <Button Name="BtnCancelRename" Content="Отмена" IsCancel="True" Padding="14,6" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+        </StackPanel>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($renameXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $TxtNewVMName    = $dlg.FindName("TxtNewVMName")
+        $TxtRenameStatus = $dlg.FindName("TxtRenameStatus")
+        $BtnDoRename     = $dlg.FindName("BtnDoRename")
+        $BtnCancelRename = $dlg.FindName("BtnCancelRename")
+
+        $dlg.Add_Loaded({
+            $TxtNewVMName.Focus() | Out-Null
+            $TxtNewVMName.SelectAll()
+        })
+
+        $script:renameResult = $null
+
+        $BtnDoRename.Add_Click({
+            $newName = $TxtNewVMName.Text.Trim()
+            if ([string]::IsNullOrWhiteSpace($newName)) {
+                $TxtRenameStatus.Text = "⚠️ Имя ВМ не может быть пустым."
+                $TxtRenameStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+                return
+            }
+            if ($newName -match '[\\/:*?"<>|]') {
+                $TxtRenameStatus.Text = "⚠️ Недопустимые символы в имени (\ / : * ? `"` < > |)."
+                $TxtRenameStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                return
+            }
+            if ($newName -ne $targetVMName) {
+                $ex = Get-VM -Name $newName -ErrorAction SilentlyContinue
+                if ($ex) {
+                    $TxtRenameStatus.Text = "⚠️ ВМ с именем '$newName' уже существует."
+                    $TxtRenameStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                    return
+                }
+            }
+
+            $script:renameResult = $newName
+            $dlg.DialogResult = $true
+            $dlg.Close()
+        })
+
+        $BtnCancelRename.Add_Click({
+            $dlg.DialogResult = $false
+            $dlg.Close()
+        })
+
+        $res = $dlg.ShowDialog()
+        if ($res -eq $true -and $script:renameResult) {
+            return $script:renameResult
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна переименования: $($_.Exception.Message)"
+    }
+    return $null
+}
+
+function Show-VMSettingsDialog {
+    param(
+        [Parameter(Mandatory=$true)][string]$targetVMName,
+        [string]$focusParam = $null
+    )
+    try {
+        $vm = Get-VM -Name $targetVMName -ErrorAction SilentlyContinue
+        if (-not $vm) {
+            [System.Windows.MessageBox]::Show("Виртуальная машина '$targetVMName' не найдена.", "Ошибка", "OK", "Error")
+            return
+        }
+
+        $curCPU = $vm.ProcessorCount
+        $curRAMGB = [math]::Round($vm.MemoryStartup / 1GB, 1)
+
+        $gpu = Get-VMGpuPartitionAdapter -VMName $targetVMName -ErrorAction SilentlyContinue
+        $curVRAMMB = 0
+        if ($gpu -and $gpu.MaxPartitionVRAM) {
+            $curVRAMMB = [math]::Round(($gpu.MaxPartitionVRAM / 1000000000) * 4096)
+        }
+
+        $curIP = Get-VMIPAddress $targetVMName
+        $isVMRunning = ($vm.State -eq 'Running')
+
+        $stateWarningVisibility = if ($isVMRunning) { "Visible" } else { "Collapsed" }
+
+        [xml]$settingsXaml = @"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Настройки виртуальной машины - $targetVMName" Height="650" Width="520"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        Background="#18181b" Foreground="#f4f4f5" FontFamily="Segoe UI">
+    <Window.Resources>
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="#27272a"/>
+            <Setter Property="Foreground" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#3f3f46"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="FontSize" Value="13"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#a1a1aa"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,0,3"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="#09090b"/>
+            <Setter Property="Background" Value="#ffffff"/>
+            <Setter Property="BorderBrush" Value="#71717a"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="#09090b"/>
+            <Setter Property="Background" Value="#ffffff"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="6,4"/>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="⚙️ Настройки виртуальной машины" FontSize="16" FontWeight="Bold" Foreground="#ffffff"/>
+                <TextBlock Text="Конфигурация аппаратных ресурсов и сети NAT" FontSize="11" Foreground="#71717a" Margin="0,2,0,0"/>
+            </StackPanel>
+            <Border Grid.Column="1" Name="BadgeDlgStatus" CornerRadius="8" Padding="10,4" Background="#27272a" VerticalAlignment="Center">
+                <TextBlock Name="TxtDlgState" Text="ОСТАНОВЛЕНА" FontSize="10" FontWeight="Bold" Foreground="#a1a1aa"/>
+            </Border>
+        </Grid>
+
+        <!-- Warning panel for running VM -->
+        <Border Grid.Row="1" Name="PnlRunningWarning" Visibility="$stateWarningVisibility" Background="#2a1f10" BorderBrush="#f59e0b" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,10">
+            <TextBlock Text="⚠️ Внимание: ВМ работает. Для изменения ядер CPU, памяти RAM и видеопамяти GPU-PV виртуальная машина должна быть выключена. При сохранении будет предложено автоматически остановить ВМ." FontSize="11" Foreground="#fbbf24" TextWrapping="Wrap"/>
+        </Border>
+
+        <!-- Field 1: VM Name -->
+        <StackPanel Grid.Row="2" Margin="0,0,0,10">
+            <TextBlock Text="Имя виртуальной машины:" FontWeight="SemiBold" Foreground="#e4e4e7"/>
+            <TextBox Name="TxtDlgVMName" Text="$targetVMName"/>
+            <TextBlock Text="Имя в Hyper-V, сетевых маршрутах и файле C:\Setup\vmname.txt" FontSize="11" Foreground="#71717a"/>
+        </StackPanel>
+
+        <!-- Field 2: CPU Cores -->
+        <StackPanel Grid.Row="3" Margin="0,0,0,10">
+            <TextBlock Text="Процессор (Ядра vCPU):" FontWeight="SemiBold" Foreground="#e4e4e7"/>
+            <ComboBox Name="CmbDlgCPU">
+                <ComboBoxItem Content="1 ядро" Tag="1"/>
+                <ComboBoxItem Content="2 ядра" Tag="2"/>
+                <ComboBoxItem Content="4 ядра (Рекомендуется)" Tag="4"/>
+                <ComboBoxItem Content="6 ядер" Tag="6"/>
+                <ComboBoxItem Content="8 ядер" Tag="8"/>
+                <ComboBoxItem Content="12 ядер" Tag="12"/>
+                <ComboBoxItem Content="16 ядер" Tag="16"/>
+                <ComboBoxItem Content="24 ядра" Tag="24"/>
+                <ComboBoxItem Content="32 ядра" Tag="32"/>
+                <ComboBoxItem Content="36 ядер (Максимум хоста)" Tag="36"/>
+            </ComboBox>
+            <TextBlock Text="Виртуальные процессоры Xeon E5-2696 v3 с поддержкой VT-x/EPT" FontSize="11" Foreground="#71717a"/>
+        </StackPanel>
+
+        <!-- Field 3: RAM Memory -->
+        <StackPanel Grid.Row="4" Margin="0,0,0,10">
+            <TextBlock Text="Оперативная память (RAM, ГБ):" FontWeight="SemiBold" Foreground="#e4e4e7"/>
+            <ComboBox Name="CmbDlgRAM">
+                <ComboBoxItem Content="2 ГБ" Tag="2"/>
+                <ComboBoxItem Content="4 ГБ" Tag="4"/>
+                <ComboBoxItem Content="6 ГБ" Tag="6"/>
+                <ComboBoxItem Content="8 ГБ (Стандарт)" Tag="8"/>
+                <ComboBoxItem Content="12 ГБ" Tag="12"/>
+                <ComboBoxItem Content="16 ГБ (Рекомендуется)" Tag="16"/>
+                <ComboBoxItem Content="24 ГБ" Tag="24"/>
+                <ComboBoxItem Content="32 ГБ" Tag="32"/>
+                <ComboBoxItem Content="48 ГБ" Tag="48"/>
+                <ComboBoxItem Content="64 ГБ (Максимум хоста)" Tag="64"/>
+            </ComboBox>
+            <TextBlock Text="Статическая ECC память с гарантированным выделением" FontSize="11" Foreground="#71717a"/>
+        </StackPanel>
+
+        <!-- Field 4: GPU-PV Video Memory -->
+        <StackPanel Grid.Row="5" Margin="0,0,0,10">
+            <TextBlock Text="GPU-PV Видеопамять (NVIDIA GTX 1050 Ti):" FontWeight="SemiBold" Foreground="#e4e4e7"/>
+            <ComboBox Name="CmbDlgVRAM">
+                <ComboBoxItem Content="0 MB (Без GPU адаптера)" Tag="0"/>
+                <ComboBoxItem Content="512 MB VRAM (125M единиц • 1/8 GPU)" Tag="512"/>
+                <ComboBoxItem Content="1024 MB VRAM (250M единиц • По умолчанию)" Tag="1024"/>
+                <ComboBoxItem Content="1536 MB VRAM (375M единиц • 3/8 GPU)" Tag="1536"/>
+                <ComboBoxItem Content="2048 MB VRAM (500M единиц • 1/2 GPU)" Tag="2048"/>
+                <ComboBoxItem Content="3072 MB VRAM (750M единиц • 3/4 GPU)" Tag="3072"/>
+                <ComboBoxItem Content="4096 MB VRAM (1000M единиц • Полный GPU)" Tag="4096"/>
+            </ComboBox>
+            <TextBlock Text="Аппаратное деление видеопамяти через Hyper-V GPU Partitioning" FontSize="11" Foreground="#71717a"/>
+        </StackPanel>
+
+        <!-- Field 5: NAT Static IP -->
+        <StackPanel Grid.Row="6" Margin="0,0,0,10">
+            <TextBlock Text="Статический IP адрес NAT (Сеть 192.168.100.x):" FontWeight="SemiBold" Foreground="#e4e4e7"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox Name="TxtDlgIP" Text="$curIP" Margin="0,0,8,0"/>
+                <Button Grid.Column="1" Name="BtnDlgSuggestIP" Content="🎲 Свободный IP" Padding="12,5" Background="#27272a" Foreground="#e4e4e7" BorderBrush="#3f3f46" Cursor="Hand" FontWeight="SemiBold"/>
+            </Grid>
+            <TextBlock Text="Шлюз 192.168.100.1 • Синхронизируется с C:\Setup\ip.txt и правилами Sing-box" FontSize="11" Foreground="#71717a"/>
+        </StackPanel>
+
+        <!-- Status & Action Buttons -->
+        <Grid Grid.Row="7" VerticalAlignment="Bottom">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Name="TxtSettingsStatus" Text="" FontSize="11" Foreground="#71717a" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Name="BtnSettingsSave" Content="💾 Сохранить изменения" IsDefault="True" Margin="0,0,8,0" Padding="16,7" Background="#2563eb" Foreground="#ffffff" BorderBrush="#3b82f6" FontWeight="Bold" Cursor="Hand"/>
+                <Button Name="BtnSettingsCancel" Content="Отмена" IsCancel="True" Padding="14,7" Background="#27272a" Foreground="#a1a1aa" BorderBrush="#3f3f46" Cursor="Hand"/>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
+"@
+        $reader = [System.Xml.XmlNodeReader]::new($settingsXaml)
+        $dlg = [Windows.Markup.XamlReader]::Load($reader)
+        $dlg.Owner = $window
+
+        $TxtDlgVMName      = $dlg.FindName("TxtDlgVMName")
+        $CmbDlgCPU         = $dlg.FindName("CmbDlgCPU")
+        $CmbDlgRAM         = $dlg.FindName("CmbDlgRAM")
+        $CmbDlgVRAM        = $dlg.FindName("CmbDlgVRAM")
+        $TxtDlgIP          = $dlg.FindName("TxtDlgIP")
+        $BtnDlgSuggestIP   = $dlg.FindName("BtnDlgSuggestIP")
+        $TxtSettingsStatus = $dlg.FindName("TxtSettingsStatus")
+        $BtnSettingsSave   = $dlg.FindName("BtnSettingsSave")
+        $BtnSettingsCancel = $dlg.FindName("BtnSettingsCancel")
+        $BadgeDlgStatus    = $dlg.FindName("BadgeDlgStatus")
+        $TxtDlgState       = $dlg.FindName("TxtDlgState")
+
+        if ($isVMRunning) {
+            $BadgeDlgStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#15803d")
+            $TxtDlgState.Text = "РАБОТАЕТ"
+            $TxtDlgState.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#86efac")
+        } else {
+            $BadgeDlgStatus.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#3f3f46")
+            $TxtDlgState.Text = "ОСТАНОВЛЕНА"
+            $TxtDlgState.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#d4d4d8")
+        }
+
+        # Initialize CPU selection
+        $cpuMatched = $false
+        for ($i = 0; $i -lt $CmbDlgCPU.Items.Count; $i++) {
+            if ([int]$CmbDlgCPU.Items[$i].Tag -eq $curCPU) {
+                $CmbDlgCPU.SelectedIndex = $i
+                $cpuMatched = $true
+                break
+            }
+        }
+        if (-not $cpuMatched) {
+            $cItem = New-Object System.Windows.Controls.ComboBoxItem
+            $cItem.Content = "$curCPU ядер (Текущее)"
+            $cItem.Tag = $curCPU
+            $idx = $CmbDlgCPU.Items.Add($cItem)
+            $CmbDlgCPU.SelectedIndex = $idx
+        }
+
+        # Initialize RAM selection
+        $ramMatched = $false
+        $targetRAMVal = [int][math]::Round($curRAMGB)
+        for ($i = 0; $i -lt $CmbDlgRAM.Items.Count; $i++) {
+            if ([int]$CmbDlgRAM.Items[$i].Tag -eq $targetRAMVal) {
+                $CmbDlgRAM.SelectedIndex = $i
+                $ramMatched = $true
+                break
+            }
+        }
+        if (-not $ramMatched) {
+            $rItem = New-Object System.Windows.Controls.ComboBoxItem
+            $rItem.Content = "$curRAMGB ГБ (Текущее)"
+            $rItem.Tag = $targetRAMVal
+            $idx = $CmbDlgRAM.Items.Add($rItem)
+            $CmbDlgRAM.SelectedIndex = $idx
+        }
+
+        # Initialize VRAM selection
+        $vramMatched = $false
+        for ($i = 0; $i -lt $CmbDlgVRAM.Items.Count; $i++) {
+            if ([int]$CmbDlgVRAM.Items[$i].Tag -eq $curVRAMMB) {
+                $CmbDlgVRAM.SelectedIndex = $i
+                $vramMatched = $true
+                break
+            }
+        }
+        if (-not $vramMatched) {
+            $vItem = New-Object System.Windows.Controls.ComboBoxItem
+            $vItem.Content = "$curVRAMMB MB VRAM (Текущее)"
+            $vItem.Tag = $curVRAMMB
+            $idx = $CmbDlgVRAM.Items.Add($vItem)
+            $CmbDlgVRAM.SelectedIndex = $idx
+        }
+
+        # Set focus when dialog finishes loading
+        $dlg.Add_Loaded({
+            if ($focusParam -eq "CPU") { $CmbDlgCPU.Focus() | Out-Null }
+            elseif ($focusParam -eq "RAM") { $CmbDlgRAM.Focus() | Out-Null }
+            elseif ($focusParam -eq "VRAM") { $CmbDlgVRAM.Focus() | Out-Null }
+            elseif ($focusParam -eq "IP") { $TxtDlgIP.Focus() | Out-Null; $TxtDlgIP.SelectAll() }
+            elseif ($focusParam -eq "Name") { $TxtDlgVMName.Focus() | Out-Null; $TxtDlgVMName.SelectAll() }
+            else { $TxtDlgVMName.Focus() | Out-Null; $TxtDlgVMName.SelectAll() }
+        })
+
+        # Suggest free IP button handler
+        $BtnDlgSuggestIP.Add_Click({
+            try {
+                $usedIps = @(1)
+                $cfg = Get-ProxyConfig
+                if ($cfg -and $cfg.assignments) {
+                    foreach ($prop in $cfg.assignments.PSObject.Properties) {
+                        if ($prop.Value -and $prop.Value.ip -match '^192\.168\.100\.(\d+)$') {
+                            $usedIps += [int]$Matches[1]
+                        }
+                    }
+                }
+                $allVMs = Get-VM -ErrorAction SilentlyContinue
+                foreach ($v in $allVMs) {
+                    $ip = Get-VMIPAddress $v.Name
+                    if ($ip -match '^192\.168\.100\.(\d+)$') { $usedIps += [int]$Matches[1] }
+                }
+                $cand = 11
+                while ($cand -in $usedIps) { $cand++ }
+                if ($cand -le 254) {
+                    $TxtDlgIP.Text = "192.168.100.$cand"
+                    $TxtSettingsStatus.Text = "💡 Выбран свободный IP: 192.168.100.$cand"
+                    $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
+                }
+            } catch {
+                $TxtSettingsStatus.Text = "⚠️ Ошибка поиска IP: $($_.Exception.Message)"
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+            }
+        })
+
+        # Save Settings Handler
+        $BtnSettingsSave.Add_Click({
+            $newName = if ($TxtDlgVMName.Text) { $TxtDlgVMName.Text.Trim() } else { "" }
+            $newCPU = if ($CmbDlgCPU.SelectedItem) { [int]$CmbDlgCPU.SelectedItem.Tag } else { $curCPU }
+            $newRAMGB = if ($CmbDlgRAM.SelectedItem) { [int]$CmbDlgRAM.SelectedItem.Tag } else { [int][math]::Round($curRAMGB) }
+            $newVRAMMB = if ($CmbDlgVRAM.SelectedItem) { [int]$CmbDlgVRAM.SelectedItem.Tag } else { $curVRAMMB }
+            $newIP = if ($TxtDlgIP.Text) { $TxtDlgIP.Text.Trim() } else { "" }
+
+            # 1. Validation
+            if ([string]::IsNullOrWhiteSpace($newName)) {
+                $TxtSettingsStatus.Text = "⚠️ Имя ВМ не может быть пустым."
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                return
+            }
+            if ($newName -match '[\\/:*?"<>|]') {
+                $TxtSettingsStatus.Text = "⚠️ Недопустимые символы в имени ВМ."
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                return
+            }
+            if ($newName -ne $targetVMName) {
+                $ex = Get-VM -Name $newName -ErrorAction SilentlyContinue
+                if ($ex) {
+                    $TxtSettingsStatus.Text = "⚠️ ВМ с именем '$newName' уже существует."
+                    $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                    return
+                }
+            }
+
+            if ($newIP -notmatch '^192\.168\.100\.(\d+)$') {
+                $TxtSettingsStatus.Text = "⚠️ IP адрес должен быть в сети 192.168.100.x"
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                return
+            }
+            $octet = [int]$Matches[1]
+            if ($octet -lt 2 -or $octet -gt 254) {
+                $TxtSettingsStatus.Text = "⚠️ Октет IP адреса ($octet) должен быть в диапазоне 2 - 254."
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                return
+            }
+
+            if ($newIP -ne $curIP) {
+                $cfg = Get-ProxyConfig
+                $otherMap = @{}
+                if ($cfg -and $cfg.assignments) {
+                    foreach ($prop in $cfg.assignments.PSObject.Properties) {
+                        if ($prop.Name -ne $targetVMName -and $prop.Value -and $prop.Value.ip) {
+                            $otherMap[$prop.Value.ip] = $prop.Name
+                        }
+                    }
+                }
+                $allVMs = Get-VM -ErrorAction SilentlyContinue
+                foreach ($v in $allVMs) {
+                    if ($v.Name -ne $targetVMName) {
+                        $otherIp = Get-VMIPAddress $v.Name
+                        if ($otherIp -and -not $otherMap.ContainsKey($otherIp)) {
+                            $otherMap[$otherIp] = $v.Name
+                        }
+                    }
+                }
+                if ($otherMap.ContainsKey($newIP)) {
+                    $TxtSettingsStatus.Text = "⚠️ IP адрес '$newIP' уже назначен ВМ '$($otherMap[$newIP])'."
+                    $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                    return
+                }
+            }
+
+            # 2. Check changes
+            $hwChanged = ($newCPU -ne $curCPU -or $newRAMGB -ne [int][math]::Round($curRAMGB) -or $newVRAMMB -ne $curVRAMMB)
+            $ipChanged = ($newIP -ne $curIP)
+            $nameChanged = ($newName -ne $targetVMName)
+
+            if (-not $hwChanged -and -not $ipChanged -and -not $nameChanged) {
+                $dlg.DialogResult = $true
+                $dlg.Close()
+                return
+            }
+
+            # 3. Check VM Running status for Hardware changes
+            $liveVM = Get-VM -Name $targetVMName
+            if ($hwChanged -and $liveVM.State -ne 'Off') {
+                $ans = [System.Windows.MessageBox]::Show("Виртуальная машина '$targetVMName' работает.`n`nДля изменения ядер CPU ($newCPU), памяти RAM ($newRAMGB ГБ) и видеопамяти GPU-PV ($newVRAMMB MB) виртуальная машина должна быть выключена.`n`nВыключить ВМ сейчас и применить новые параметры?", "Требуется остановка ВМ", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+                if ($ans -ne [System.Windows.MessageBoxResult]::Yes) {
+                    $TxtSettingsStatus.Text = "⚠️ Применение отменено: ВМ должна быть выключена."
+                    $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#f59e0b")
+                    return
+                }
+
+                $TxtSettingsStatus.Text = "⏳ Остановка виртуальной машины '$targetVMName'..."
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
+                Write-ConsoleLog "Остановка ВМ '$targetVMName' перед изменением оборудования..."
+                Stop-VM -Name $targetVMName -TurnOff -Force -ErrorAction Stop
+                $timeout = 20
+                while ((Get-VM -Name $targetVMName).State -ne 'Off' -and $timeout -gt 0) {
+                    Start-Sleep -Seconds 1
+                    $timeout--
+                }
+                if ((Get-VM -Name $targetVMName).State -ne 'Off') {
+                    throw "Не удалось остановить виртуальную машину '$targetVMName' перед изменением оборудования."
+                }
+            }
+
+            $TxtSettingsStatus.Text = "⏳ Применение настроек..."
+            $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#38bdf8")
+
+            try {
+                # 4. Apply Hardware (only changed components)
+                if ($hwChanged) {
+                    $applyCPU = if ($newCPU -ne $curCPU) { $newCPU } else { 0 }
+                    $applyRAM = if ($newRAMGB -ne [int][math]::Round($curRAMGB)) { ($newRAMGB * 1GB) } else { 0 }
+                    $applyVRAM = if ($newVRAMMB -ne $curVRAMMB) { $newVRAMMB } else { -1 }
+                    Set-VMHardwareConfig -VMName $targetVMName -CPUCount $applyCPU -RAMBytes $applyRAM -VRAMMB $applyVRAM -ForceStop:$false
+                    Write-ConsoleLog "Параметры оборудования для '$targetVMName' обновлены: $newCPU vCPU, $newRAMGB ГБ RAM, $newVRAMMB MB VRAM."
+                }
+
+                # 5. Apply IP
+                if ($ipChanged) {
+                    Set-VMStaticIP -VMName $targetVMName -IPAddress $newIP
+                    Write-ConsoleLog "IP адрес для '$targetVMName' изменен на $newIP."
+                }
+
+                # 6. Apply Rename
+                $effectiveName = $targetVMName
+                if ($nameChanged) {
+                    Rename-GamingVM -OldVMName $targetVMName -NewVMName $newName
+                    $effectiveName = $newName
+                    Write-ConsoleLog "Виртуальная машина '$targetVMName' переименована в '$newName'."
+                }
+
+                $script:modifiedVMTarget = $effectiveName
+                $dlg.DialogResult = $true
+                $dlg.Close()
+            } catch {
+                $TxtSettingsStatus.Text = "🔴 Ошибка сохранения: $($_.Exception.Message)"
+                $TxtSettingsStatus.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString("#ef4444")
+                Write-ConsoleLog "[!] Ошибка сохранения параметров: $($_.Exception.Message)"
+            }
+        })
+
+        $BtnSettingsCancel.Add_Click({
+            $dlg.DialogResult = $false
+            $dlg.Close()
+        })
+
+        $script:modifiedVMTarget = $null
+        $res = $dlg.ShowDialog()
+        Refresh-VMList
+        $selName = if ($script:modifiedVMTarget) { $script:modifiedVMTarget } else { $targetVMName }
+        $newItem = $ListVMs.Items | Where-Object { $_.Name -eq $selName } | Select-Object -First 1
+        if ($newItem) {
+            $ListVMs.SelectedItem = $newItem
+        }
+        Refresh-ProxyProfilesUI
+        Update-SelectedVMDetails -ForceControlsUpdate $true
+    } catch {
+        Write-ConsoleLog "[!] Ошибка окна настроек ВМ: $($_.Exception.Message)"
+    }
 }
 
 function Show-AddProxyDialog {
@@ -1462,12 +2122,145 @@ $BtnRandomizeHWID.Add_Click({
         Write-ConsoleLog "Запуск спуфинга и аппаратной рандомизации для '$($sel.Name)'..."
         $randScript = Join-Path $PSScriptRoot "Host-HyperV-Randomize.ps1"
         Start-Process powershell.exe -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$randScript`" -VMName `"$($sel.Name)`"" -Wait
-        Write-ConsoleLog "Аппаратный профиль '$($sel.Name)' успешно рандомизирован!"
-        Refresh-VMList
+        Write-Host "    -> Generated unique ComputerName and Hostname: $VMName" -ForegroundColor Gray
     } catch {
         Write-ConsoleLog "[!] Ошибка при спуфинге HWID: $($_.Exception.Message)"
     }
 })
+
+$BtnEditVM.Add_Click({
+    try {
+        $sel = $ListVMs.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для изменения настроек.", "Настройки ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
+        }
+        Show-VMSettingsDialog -targetVMName $sel.Name
+    } catch {
+        Write-ConsoleLog "[!] Ошибка вызова настроек ВМ: $($_.Exception.Message)"
+    }
+})
+
+$BtnRenameVM.Add_Click({
+    try {
+        $sel = $ListVMs.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для переименования.", "Переименование ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
+        }
+        $newName = Show-RenameVMDialog -targetVMName $sel.Name
+        if ($newName -and $newName -ne $sel.Name) {
+            Write-ConsoleLog "Переименование виртуальной машины '$($sel.Name)' в '$newName'..."
+            Rename-GamingVM -OldVMName $sel.Name -NewVMName $newName
+            Write-ConsoleLog "Виртуальная машина '$($sel.Name)' успешно переименована в '$newName'!"
+            Refresh-VMList
+            $newItem = $ListVMs.Items | Where-Object { $_.Name -eq $newName } | Select-Object -First 1
+            if ($newItem) {
+                $ListVMs.SelectedItem = $newItem
+            }
+            Refresh-ProxyProfilesUI
+            Update-SelectedVMDetails -ForceControlsUpdate $true
+        }
+    } catch {
+        Write-ConsoleLog "[!] Ошибка переименования ВМ: $($_.Exception.Message)"
+        [System.Windows.MessageBox]::Show("Ошибка переименования ВМ:`n$($_.Exception.Message)", "Ошибка", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
+    }
+})
+
+# Right-click item selection handler for ContextMenu
+$ListVMs.Add_PreviewMouseRightButtonDown({
+    param($sender, $e)
+    try {
+        $pt = $e.GetPosition($ListVMs)
+        $hit = [System.Windows.Media.VisualTreeHelper]::HitTest($ListVMs, $pt)
+        if ($hit -and $hit.VisualHit) {
+            $elem = $hit.VisualHit
+            while ($elem -and $elem -ne $ListVMs) {
+                if ($elem -is [System.Windows.Controls.ListBoxItem]) {
+                    if ($elem.DataContext) {
+                        $ListVMs.SelectedItem = $elem.DataContext
+                    }
+                    break
+                }
+                $elem = [System.Windows.Media.VisualTreeHelper]::GetParent($elem)
+            }
+        }
+    } catch {}
+})
+
+$BtnEditCPU.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для изменения параметров.", "Настройки ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+    Show-VMSettingsDialog -targetVMName $sel.Name -focusParam "CPU"
+})
+
+$BtnEditRAM.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для изменения параметров.", "Настройки ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+    Show-VMSettingsDialog -targetVMName $sel.Name -focusParam "RAM"
+})
+
+$BtnEditVRAM.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для изменения параметров.", "Настройки ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+    Show-VMSettingsDialog -targetVMName $sel.Name -focusParam "VRAM"
+})
+
+$BtnEditIP.Add_Click({
+    $sel = $ListVMs.SelectedItem
+    if (-not $sel) {
+        [System.Windows.MessageBox]::Show("Пожалуйста, выберите виртуальную машину для изменения параметров.", "Настройки ВМ", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        return
+    }
+    Show-VMSettingsDialog -targetVMName $sel.Name -focusParam "IP"
+})
+
+# Context Menu Events
+if ($CtxStartVM) {
+    $CtxStartVM.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { $BtnStartVM.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent))) }
+    })
+}
+if ($CtxStopVM) {
+    $CtxStopVM.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { $BtnStopVM.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent))) }
+    })
+}
+if ($CtxEditVM) {
+    $CtxEditVM.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { Show-VMSettingsDialog -targetVMName $sel.Name }
+    })
+}
+if ($CtxRenameVM) {
+    $CtxRenameVM.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { $BtnRenameVM.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent))) }
+    })
+}
+if ($CtxRandomizeHWID) {
+    $CtxRandomizeHWID.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { $BtnRandomizeHWID.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent))) }
+    })
+}
+if ($CtxOpenStream) {
+    $CtxOpenStream.Add_Click({
+        $sel = $ListVMs.SelectedItem
+        if ($sel) { $BtnOpenStream.RaiseEvent((New-Object System.Windows.RoutedEventArgs([System.Windows.Controls.Button]::ClickEvent))) }
+    })
+}
 
 $BtnCloneVM.Add_Click({
     try {
@@ -1500,6 +2293,16 @@ $BtnCloneVM.Add_Click({
         
         if ($proc.ExitCode -eq 0) {
             Write-ConsoleLog "Клонирование успешно завершено! Создана VM '$newName'."
+            try {
+                $cfg = Get-ProxyConfig
+                if (-not $cfg.assignments) { $cfg | Add-Member -MemberType NoteProperty -Name "assignments" -Value ([PSCustomObject]@{}) -Force }
+                if (-not $cfg.assignments.$newName) {
+                    $newAssign = [PSCustomObject]@{ enabled = $false; profileId = $null; ip = $newIP }
+                    $cfg.assignments | Add-Member -MemberType NoteProperty -Name $newName -Value $newAssign -Force
+                    Save-ProxyConfig $cfg
+                }
+                if ($Script:VMIPMap) { $Script:VMIPMap[$newName] = $newIP }
+            } catch {}
             Refresh-VMList
             $newItem = $ListVMs.Items | Where-Object { $_.Name -eq $newName } | Select-Object -First 1
             if ($newItem) {
@@ -1609,7 +2412,16 @@ $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromSeconds(3)
 $timer.Add_Tick({
     # Silently refresh status colors and states
-    $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "Gaming-*" }
+    $cfg = if (Get-Command Get-ProxyConfig -ErrorAction SilentlyContinue) { Get-ProxyConfig } else { $null }
+    $assignedNames = @()
+    if ($cfg -and $cfg.assignments) {
+        $assignedNames = @($cfg.assignments.PSObject.Properties.Name)
+    }
+    $allVMs = Get-VM -ErrorAction SilentlyContinue | Where-Object { 
+        $_.Name -like "Gaming-*" -or 
+        $_.Name -in $assignedNames -or
+        (Get-VMNetworkAdapter -VMName $_.Name -ErrorAction SilentlyContinue | Where-Object { $_.SwitchName -eq "VM-Gaming-Switch" })
+    }
     foreach ($item in $ListVMs.Items) {
         $vm = $allVMs | Where-Object { $_.Name -eq $item.Name }
         if ($vm) {
