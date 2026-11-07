@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Host-Proxy-Manager.ps1 - External SOCKS5 Proxy & DNS Leak-Free Routing Manager for Hyper-V Gaming VMs.
 .DESCRIPTION
@@ -18,6 +18,7 @@ $Script:SingBoxDir = Join-Path $Script:RootDir "tools\sing-box"
 $Script:SingBoxExe = Join-Path $Script:SingBoxDir "sing-box.exe"
 $Script:SingBoxCfg = Join-Path $Script:ConfigDir "sing-box.json"
 $Script:SingBoxLog = Join-Path $Script:SingBoxDir "sing-box.log"
+$Script:GuestWatchdog = Join-Path $Script:RootDir "staging\ensure_static_ip.ps1"
 
 # Default VM Static IPs mapping
 $Script:VMIPMap = @{
@@ -171,12 +172,11 @@ function Build-SingBoxConfig {
         tag = "block"
     }
 
-    # Base DNS server: direct (for host / non-proxied subnets)
+    # Base DNS server: direct (for host / local subnets, NO detour property)
     $dnsServers += [PSCustomObject]@{
         type = "udp"
         tag = "dns-direct"
         server = "1.1.1.1"
-        detour = "direct"
     }
 
     # Check each VM assignment
@@ -206,28 +206,33 @@ function Build-SingBoxConfig {
                     }
                     $outbounds += $socksOutbound
 
-                    # Remote DNS over SOCKS5 proxy (Zero DNS Leak!)
+                    # Remote DNS over SOCKS5 proxy via DoH (port 443, Zero DNS Leak!)
                     $dnsServers += [PSCustomObject]@{
-                        type = "tcp"
+                        type = "https"
                         tag = $dnsTag
                         server = "1.1.1.1"
+                        server_port = 443
+                        path = "/dns-query"
                         detour = $outboundTag
+                        tls = [PSCustomObject]@{
+                            enabled = $true
+                            server_name = "cloudflare-dns.com"
+                        }
                     }
 
                     # VM IP
                     $vmIp = $Script:VMIPMap[$vmName]
                     if (-not $vmIp) {
-                        # Dynamic fallback
                         $vmIp = "192.168.100." + ($activeRules.Count + 11)
                     }
 
-                    # DNS Rule: queries from this VM IP use the remote DNS detour
+                    # DNS Rule: queries originating from this VM use its dedicated DoH-over-SOCKS5 endpoint
                     $dnsRules += [PSCustomObject]@{
                         source_ip_cidr = @("$vmIp/32")
                         server = $dnsTag
                     }
 
-                    # Route Rule: traffic from this VM IP routes to the proxy
+                    # Route Rule: all TCP/UDP traffic from this VM routes to its SOCKS5 proxy
                     $activeRules += [PSCustomObject]@{
                         source_ip_cidr = @("$vmIp/32")
                         outbound = $outboundTag
@@ -247,7 +252,7 @@ function Build-SingBoxConfig {
             action = "hijack-dns"
             port = 53
         },
-        # Local communication (Moonlight streaming / Sunshine host-to-guest) NEVER proxied!
+        # Local subnets (LAN, Moonlight streaming, localhost) ALWAYS direct
         [PSCustomObject]@{
             ip_cidr = @("192.168.100.0/24", "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12")
             outbound = "direct"
@@ -258,7 +263,7 @@ function Build-SingBoxConfig {
     # Full sing-box config object (Sing-box 1.14+ compliant)
     $singBoxObj = [PSCustomObject]@{
         log = [PSCustomObject]@{
-            level = "warn"
+            level = "info"
             output = $Script:SingBoxLog
             timestamp = $true
         }
@@ -294,15 +299,17 @@ function Build-SingBoxConfig {
 }
 
 function Ensure-HostForwardingSafeguard {
-    # CRITICAL: Disable forwarding on physical Ethernet so Windows socket binding doesn't loop sing-box outbound into TUN
+    # 1. Disable forwarding on physical Ethernet adapters so outbound sockets do not loop back into TUN
     try {
         Get-NetIPInterface -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notlike "*VM-Gaming-Switch*" -and $_.Forwarding -eq "Enabled" } | ForEach-Object {
             Set-NetIPInterface -InterfaceIndex $_.ifIndex -Forwarding Disabled -ErrorAction SilentlyContinue
         }
-        # Ensure forwarding is enabled on the internal VM switch
+        # 2. Ensure forwarding is enabled on the internal VM switch
         Get-NetIPInterface -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -like "*VM-Gaming-Switch*" } | ForEach-Object {
             Set-NetIPInterface -InterfaceIndex $_.ifIndex -Forwarding Enabled -ErrorAction SilentlyContinue
         }
+        # 3. CRITICAL: Remove any NetNat on 192.168.100.0/24 which would mask VM source IPs
+        Get-NetNat -ErrorAction SilentlyContinue | Where-Object { $_.InternalIPInterfaceAddressPrefix -like "192.168.100*" } | Remove-NetNat -Confirm:$false -ErrorAction SilentlyContinue
     } catch {}
 }
 
@@ -323,22 +330,31 @@ function Start-ProxyEngine {
         throw "Sing-box config validation failed! Check $Script:SingBoxCfg"
     }
 
-    # Check if sing-box is already running
-    $running = Get-Process sing-box -ErrorAction SilentlyContinue
-    if ($running) {
-        # Restart cleanly with new configuration
-        Stop-Process -Id $running.Id -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Milliseconds 600
-    }
+    # Ensure background system task exists and runs elevated under SYSTEM
+    $taskName = "SingBox-Proxy-Engine"
+    $action = New-ScheduledTaskAction -Execute $Script:SingBoxExe -Argument "run -c `"$Script:SingBoxCfg`""
+    $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0 -Priority 3
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
 
-    Write-Host "[+] Starting Sing-box Transparent Routing Engine..." -ForegroundColor Green
-    $startArgs = "-NoProfile -ExecutionPolicy Bypass -Command `"& '$Script:SingBoxExe' run -c '$Script:SingBoxCfg'`""
-    Start-Process powershell.exe -ArgumentList $startArgs -WindowStyle Hidden -Verb RunAs
+    # Stop any existing running instance
+    Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+    Get-Process sing-box -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 600
+
+    Write-Host "[+] Starting Sing-box Transparent Routing Engine via System Task..." -ForegroundColor Green
+    Start-ScheduledTask -TaskName $taskName
     Start-Sleep -Seconds 2
+
+    $checkProc = Get-Process sing-box -ErrorAction SilentlyContinue
+    if (-not $checkProc) {
+        Write-Warning "Sing-box process exited unexpectedly. Check $Script:SingBoxLog"
+    }
 }
 
 function Stop-ProxyEngine {
     Write-Host "[*] Stopping Sing-box Transparent Routing Engine..." -ForegroundColor Yellow
+    Stop-ScheduledTask -TaskName "SingBox-Proxy-Engine" -ErrorAction SilentlyContinue
     Get-Process sing-box -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 500
 }
@@ -368,13 +384,19 @@ function Set-VMProxyRouting {
 
     Save-ProxyConfig $cfg
 
-    # Hyper-V Hypervisor Hardware Kill-Switch:
-    # When Enabled: Disconnect Internet adapter on Default Switch (Physically closes direct host internet leak!)
+    # Start or update the transparent routing engine first so endpoints are immediately alive
+    Start-ProxyEngine
+
+    # Hyper-V Hardware Kill-Switch:
+    # When Enabled: Disconnect Internet adapter on Default Switch (Physically blocks direct host internet leak!)
     # When Disabled: Connect Internet adapter to Default Switch
     try {
         $vm = Get-VM -Name $VMName -ErrorAction SilentlyContinue
         if ($vm) {
-            $inetAdapter = Get-VMNetworkAdapter -VMName $VMName | Where-Object { $_.Name -eq "Internet" -or $_.SwitchName -eq "Default Switch" } | Select-Object -First 1
+            $inetAdapter = Get-VMNetworkAdapter -VMName $VMName | Where-Object { 
+                $_.Name -eq "Internet" -or $_.SwitchName -eq "Default Switch" -or $_.Name -like "*Internet*" 
+            } | Select-Object -First 1
+
             if ($inetAdapter) {
                 if ($Enabled) {
                     Write-Host "[*] Hardware Kill-Switch: Disconnecting direct Internet adapter on $VMName..." -ForegroundColor Yellow
@@ -385,50 +407,74 @@ function Set-VMProxyRouting {
                 }
             }
 
-            # Configure Guest Default Gateway via PowerShell Direct if VM is running
+            # Configure Guest Network Settings via single atomic PowerShell Direct call if VM is running
             if ($vm.State -eq 'Running') {
-                $vmIp = $Script:VMIPMap[$VMName]
-                if (-not $vmIp) { $vmIp = "192.168.100.11" }
-
-                # Pass credentials (user 'Gamer' blank password or admin)
+                $watchdogCode = if (Test-Path $Script:GuestWatchdog) { Get-Content -Path $Script:GuestWatchdog -Raw -Encoding UTF8 } else { "" }
                 $cred = New-Object System.Management.Automation.PSCredential("Gamer", (New-Object System.Security.SecureString))
-                
-                if ($Enabled) {
-                    # Inject gateway 192.168.100.1 and DNS 1.1.1.1
-                    Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock {
-                        param($targetIp)
-                        $gamingNic = Get-NetAdapter | Where-Object { 
+
+                Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock {
+                    param($code, $isProxyMode)
+                    
+                    # 1. Update persistent watchdog script inside VM
+                    if ($code) {
+                        try {
+                            if (-not (Test-Path "C:\Setup")) { New-Item -ItemType Directory -Path "C:\Setup" -Force | Out-Null }
+                            [System.IO.File]::WriteAllText("C:\Setup\ensure_static_ip.ps1", $code, [System.Text.UTF8Encoding]::new($true))
+                        } catch {}
+                    }
+
+                    if ($isProxyMode) {
+                        # PROXY MODE:
+                        # 2. Disable Internet NIC if present to prevent DNS/gateway leakage and delays
+                        $inetNic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
+                            $_.MacAddress -like "00-15-5D*" -or $_.Name -like "*Internet*" 
+                        } | Select-Object -First 1
+                        if ($inetNic) {
+                            Disable-NetAdapter -Name $inetNic.Name -Confirm:$false -ErrorAction SilentlyContinue
+                        }
+
+                        # 3. Configure Gaming NIC
+                        $gamingNic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
                             $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
                             $ip -like "192.168.100.*"
                         } | Select-Object -First 1
                         if ($gamingNic) {
                             $gw = Get-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue
                             if (-not $gw) {
-                                New-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -NextHop "192.168.100.1" -RouteMetric 10 -ErrorAction SilentlyContinue | Out-Null
+                                route add 0.0.0.0 mask 0.0.0.0 192.168.100.1 metric 1 -p | Out-Null
                             }
                             Set-DnsClientServerAddress -InterfaceIndex $gamingNic.ifIndex -ServerAddresses @("1.1.1.1", "8.8.8.8") -ErrorAction SilentlyContinue
+                            Clear-DnsClientCache
                         }
-                    } -ArgumentList $vmIp -ErrorAction SilentlyContinue
-                } else {
-                    # Remove default route on gaming nic
-                    Invoke-Command -VMName $VMName -Credential $cred -ScriptBlock {
-                        $gamingNic = Get-NetAdapter | Where-Object { 
+                    } else {
+                        # DIRECT MODE:
+                        # 2. Re-enable Internet NIC
+                        $inetNic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
+                            $_.MacAddress -like "00-15-5D*" -or $_.Name -like "*Internet*" 
+                        } | Select-Object -First 1
+                        if ($inetNic) {
+                            Enable-NetAdapter -Name $inetNic.Name -Confirm:$false -ErrorAction SilentlyContinue
+                            Start-Sleep -Seconds 1
+                            & cmd.exe /c "ipconfig /renew `"$($inetNic.Name)`"" | Out-Null
+                        }
+
+                        # 3. Reset Gaming NIC: remove gateway so it doesn't conflict
+                        $gamingNic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object { 
                             $ip = (Get-NetIPAddress -InterfaceIndex $_.ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue).IPAddress
                             $ip -like "192.168.100.*"
                         } | Select-Object -First 1
                         if ($gamingNic) {
                             Remove-NetRoute -InterfaceIndex $gamingNic.ifIndex -DestinationPrefix "0.0.0.0/0" -Confirm:$false -ErrorAction SilentlyContinue
+                            Set-DnsClientServerAddress -InterfaceIndex $gamingNic.ifIndex -ResetServerAddresses -ErrorAction SilentlyContinue
+                            Clear-DnsClientCache
                         }
-                    } -ErrorAction SilentlyContinue
-                }
+                    }
+                } -ArgumentList $watchdogCode, $Enabled -ErrorAction SilentlyContinue
             }
         }
     } catch {
         Write-Warning "Hyper-V adapter adjustment note: $_"
     }
-
-    # Reload sing-box engine
-    Start-ProxyEngine
 }
 
 function Get-VMProxyState {
@@ -465,5 +511,5 @@ function Get-VMProxyState {
 
 if ($MyInvocation.MyCommand.CommandType -eq 'Script' -and $ExecutionContext.SessionState.Module) {
     Export-ModuleMember -Function Get-ProxyConfig, Save-ProxyConfig, Test-ProxyEndpoint, Build-SingBoxConfig, `
-                               Start-ProxyEngine, Stop-ProxyEngine, Set-VMProxyRouting, Get-VMProxyState -ErrorAction SilentlyContinue
+                                Start-ProxyEngine, Stop-ProxyEngine, Set-VMProxyRouting, Get-VMProxyState -ErrorAction SilentlyContinue
 }
