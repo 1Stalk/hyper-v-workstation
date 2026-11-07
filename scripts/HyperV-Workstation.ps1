@@ -475,8 +475,23 @@ function Get-VMIPAddress([string]$vmName) {
     try {
         $vm = Get-VM -Name $vmName -ErrorAction SilentlyContinue
         if ($vm -and $vm.State -eq 'Running') {
-            $ip = ($vm.NetworkAdapters.IPAddresses | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notlike '169.254.*' -and $_ -like '192.168.100.*' })[0]
-            if ($ip) { return $ip }
+            $liveIps = @($vm.NetworkAdapters.IPAddresses | Where-Object { 
+                $_ -match '^\d+\.\d+\.\d+\.\d+$' -and $_ -notlike '169.254.*' -and $_ -ne '0.0.0.0'
+            })
+            # Prioritize 192.168.100.* NAT IPs
+            $natIp = @($liveIps | Where-Object { $_ -like '192.168.100.*' })
+            if ($natIp -and $natIp.Count -gt 0) {
+                $candidate = [string]$natIp[0]
+                if ($candidate -match '^\d+\.\d+\.\d+\.\d+$' -and $candidate.Length -gt 6) {
+                    return $candidate
+                }
+            }
+            if ($liveIps -and $liveIps.Count -gt 0) {
+                $candidate = [string]$liveIps[0]
+                if ($candidate -match '^\d+\.\d+\.\d+\.\d+$' -and $candidate.Length -gt 6) {
+                    return $candidate
+                }
+            }
         }
     } catch {}
 
@@ -487,7 +502,10 @@ function Get-VMIPAddress([string]$vmName) {
             if ($cfg -and $cfg.assignments) {
                 $assign = $cfg.assignments.$vmName
                 if ($assign -and $assign.ip) {
-                    return $assign.ip
+                    $val = [string]$assign.ip
+                    if ($val -match '^\d+\.\d+\.\d+\.\d+$' -and $val.Length -gt 6) {
+                        return $val
+                    }
                 }
             }
         } catch {}
@@ -501,16 +519,25 @@ function Get-VMIPAddress([string]$vmName) {
         "Gaming-VM4" = "192.168.100.14"
         "Gaming-VM5" = "192.168.100.15"
         "Gaming-VM6" = "192.168.100.16"
+        "AM1"        = "192.168.100.11"
+        "AM2"        = "192.168.100.12"
+        "AM3"        = "192.168.100.13"
+        "AM4"        = "192.168.100.14"
+        "AM5"        = "192.168.100.15"
+        "AM6"        = "192.168.100.16"
     }
     if ($ipMap.ContainsKey($vmName)) {
-        return $ipMap[$vmName]
+        return [string]$ipMap[$vmName]
     }
     if ($Script:VMIPMap -and $Script:VMIPMap.ContainsKey($vmName)) {
-        return $Script:VMIPMap[$vmName]
+        $val = [string]$Script:VMIPMap[$vmName]
+        if ($val -match '^\d+\.\d+\.\d+\.\d+$' -and $val.Length -gt 6) {
+            return $val
+        }
     }
     
-    # 4. Fallback from VM name number Gaming-VM<N>
-    if ($vmName -match '^Gaming-VM(\d+)$') {
+    # 4. Fallback from VM name number Gaming-VM<N> or AM<N>
+    if ($vmName -match '(?:Gaming-VM|AM)(\d+)$') {
         return "192.168.100.$(10 + [int]$Matches[1])"
     }
 
@@ -628,7 +655,9 @@ function Update-SelectedVMDetails {
     $TxtCPU.Text = "$($sel.CPUCount) ядер"
     $TxtRAM.Text = "$($sel.RAMStartup) ГБ"
     $TxtVRAM.Text = $sel.VRAMText
-    $TxtIP.Text = $sel.IP
+    $ipDisplay = if ($sel.IP -and $sel.IP -ne "1" -and $sel.IP -ne "-" -and $sel.IP.Length -gt 6) { $sel.IP } else { Get-VMIPAddress $sel.Name }
+    $sel.IP = $ipDisplay
+    $TxtIP.Text = $ipDisplay
 
     # Update SOCKS5 Proxy Card State for selected VM
     if (Get-Command Get-VMProxyState -ErrorAction SilentlyContinue) {
@@ -742,7 +771,8 @@ $BtnOpenStream.Add_Click({
     $modeArg = if ($CmbMode.SelectedIndex -eq 0) { "--display-mode windowed" } else { "--display-mode fullscreen" }
     $resArg = if ($CmbResolution.SelectedIndex -eq 0) { "--width 1024 --height 768" } elseif ($CmbResolution.SelectedIndex -eq 1) { "--720" } else { "--1080" }
     $fpsArg = if ($CmbFps.SelectedIndex -eq 0) { "--fps 60" } else { "--fps 120" }
-    $guestIp = $sel.IP
+    $guestIp = if ($sel.IP -and $sel.IP -ne "1" -and $sel.IP -ne "-" -and $sel.IP.Length -gt 6) { $sel.IP } else { Get-VMIPAddress $sel.Name }
+    $sel.IP = $guestIp
 
     Write-ConsoleLog "Запуск окна Moonlight: $guestIp (Режим: Windowed VMware-like, $($CmbResolution.Text))..."
     
@@ -2043,14 +2073,17 @@ $BtnPairMoonlight.Add_Click({
             return
         }
 
-        $pin = Show-PairMoonlightDialog -vmIp $sel.IP -vmName $sel.Name
+        $targetIp = if ($sel.IP -and $sel.IP -ne "1" -and $sel.IP -ne "-" -and $sel.IP.Length -gt 6) { $sel.IP } else { Get-VMIPAddress $sel.Name }
+        $sel.IP = $targetIp
+
+        $pin = Show-PairMoonlightDialog -vmIp $targetIp -vmName $sel.Name
         if ([string]::IsNullOrWhiteSpace($pin)) { return }
 
-        Write-ConsoleLog "Связывание Moonlight с хостом $($sel.IP) с PIN: $pin..."
+        Write-ConsoleLog "Связывание Moonlight с хостом $targetIp с PIN: $pin..."
         
         # 1. Start Moonlight pairing process in background
         try {
-            Start-Process -FilePath $MoonlightExe -ArgumentList "pair $($sel.IP) --pin $pin"
+            Start-Process -FilePath $MoonlightExe -ArgumentList "pair $targetIp --pin $pin"
             Start-Sleep -Seconds 2
         } catch {
             Write-ConsoleLog "[!] Ошибка запуска Moonlight: $($_.Exception.Message)"
@@ -2058,7 +2091,7 @@ $BtnPairMoonlight.Add_Click({
 
         # 2. Submit PIN to Sunshine Web API on guest
         try {
-            $pairUrl = "https://$($sel.IP):47990/api/pin"
+            $pairUrl = "https://${targetIp}:47990/api/pin"
             $pairHeader = @{
                 Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("admin:admin1234"))
             }
@@ -2428,6 +2461,12 @@ $timer.Add_Tick({
             $item.State = $vm.State
             $item.StateText = if ($vm.State -eq 'Running') { "Работает" } else { "Остановлена" }
             $item.StatusColor = if ($vm.State -eq 'Running') { "#22c55e" } else { "#71717a" }
+            if ($vm.State -eq 'Running') {
+                $freshIp = Get-VMIPAddress $vm.Name
+                if ($freshIp -and $freshIp -ne "1" -and $freshIp -ne "-" -and $freshIp.Length -gt 6) {
+                    $item.IP = $freshIp
+                }
+            }
         }
     }
     $ListVMs.Items.Refresh()
