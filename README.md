@@ -1,233 +1,132 @@
-# Hyper-V GPU-PV Workstation Cluster
+# Hyper-V Workstation
 
-[![GitHub License](https://img.shields.io/badge/license-GPLv3%20%2F%20MIT-blue.svg)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-Windows%2011%20%7C%20Server%202022%2F2025-0078d4.svg)](https://microsoft.com)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-Windows%2011%20%7C%20Server-0078d4.svg)](https://microsoft.com)
 [![Hyper-V](https://img.shields.io/badge/Hyper--V-GPU--PV-success.svg)](https://learn.microsoft.com/virtualization/hyper-v-on-windows/)
 
-Полнофункциональная автоматизированная платформа развёртывания игровых виртуальных машин на базе технологии **Hyper-V GPU Partitioning (GPU-PV)**.
-
-Включает:
-- Оконную консоль управления в стиле **VMware Workstation** с нативным запуском потока **Moonlight** (60 FPS, низкая задержка, захват «сырого» ввода мыши).
-- Встроенную подсистему **аппаратного спуфинга и рандомизации железа (Anti-VM Detection)** для обхода античитов и антифрод-систем.
-- **Прозрачную хостовую маршрутизацию через внешние SOCKS5-прокси** (на базе ядра Sing-box, Windows Filtering Platform и TUN-стека gVisor) с аппаратным Kill-Switch и защитой от утечек DNS.
-- **Мгновенное клонирование ВМ за 20 секунд** на базе разностных дисков VHDX (Differencing Disks).
+A lightweight, automated management platform for high-performance Windows 11 virtual machines on **Hyper-V GPU Partitioning (GPU-PV)**.
 
 ---
 
-## 1. Архитектура решения
+## Features
 
-```text
-+-----------------------------------------------------------------------------------+
-| ХОСТ (Windows 11 / Server)                                                        |
-|                                                                                   |
-|  +--------------------------------+       +------------------------------------+  |
-|  | Moonlight Client (Оконный вид) | <----+ | Hyper-V Workstation Launcher (GUI) |  |
-|  | - Отдельное окно (1024x768@60) |       | - Список всех ВМ в боковой панели  |  |
-|  | - Плавные 60 FPS / Direct3D     |       | - [▶ Старт], [⏹ Стоп], [🖥️ Стрим]  |  |
-|  | - Захват "сырой" мыши (Raw)     |       | - [🎲 Спуфинг HWID железа]         |  |
-|  | - Задержка ввода < 2 мс        |       | - [➕ Клонировать новую ВМ (20с)]   |  |
-|  |                                |       | - [🌐 Назначение SOCKS5 Прокси]    |  |
-|  +----------------+---------------+       +-----------------+------------------+  |
-|                   |                                         |                     |
-|                   | Внутренний коммутатор                   | Управление WMI/WFP  |
-|                   | (192.168.100.0/24)                      v                     |
-|                   |                       +------------------------------------+  |
-|                   |                       | Sing-box Routing Engine            |  |
-|                   |                       | - Хостовый WFP/gVisor TUN          |  |
-|                   |                       | - Изоляция IP каждой ВМ            |  |
-|                   |                       | - Защита от DNS-утечек             |  |
-|                   |                       | - Аппаратный Kill-Switch           |  |
-|                   |                       +-----------------+------------------+  |
-+-------------------|-----------------------------------------|---------------------+
-                    v                                         v Внешний SOCKS5
-+-----------------------------------------------------------------------------------+
-| ГОСТЕВАЯ ВМ (Windows 11 Pro 25H2)                                                 |
-|                                                                                   |
-|  +--------------------------------+                                               |
-|  | Сервер Sunshine                |                                               |
-|  | (Захват кадров с VDD через     |                                               |
-|  |  NVFBC/DXGI и сжатие по NVENC) |                                               |
-|  +----------------+---------------+                                               |
-|                   ^                                                               |
-|  +----------------+------------------------------------------------------------+  |
-|  | Virtual Display Driver (VDD) - 1024x768 @ 60Hz                              |  |
-|  | Выделенный GPU: NVIDIA GPU-PV Slice (1024 МБ VRAM)                          |  |
-|  | Рабочий стол: автоматическое копирование софта из software/desktop/         |  |
-|  | Гостевой Watchdog: поддержание статического IP 192.168.100.x и шлюза        |  |
-|  +-----------------------------------------------------------------------------+  |
-+-----------------------------------------------------------------------------------+
-```
+- **VMware-style GUI Console**: Built-in management interface with 1-click VM actions (Power, Reset, HW settings, VM rename).
+- **Moonlight Streaming**: Windowed 60 FPS, ultra-low latency desktop streaming with raw mouse input capture.
+- **Fast Differencing Cloning**: Deploy new ready-to-use virtual machines in ~20 seconds using VHDX differencing disks.
+- **Anti-VM Hardware Spoofing**: Built-in randomizer for SMBIOS, Motherboard/Chassis serials, System UUID, MAC addresses, SCSI disk IDs, and Windows registry identifiers.
+- **Host-Side SOCKS5 Proxy Router**: Per-VM transparent routing via Sing-box with DNS leak prevention and hardware kill-switch.
+- **Dynamic Guest Provisioning**: Automatic deployment of software installers (`software/desktop/`) to guest public desktops without manual copying.
 
 ---
 
-## 2. Структура репозитория
+## Repository Structure
 
 ```text
 hyper-v-workstation/
 ├── config/
-│   ├── proxy-profiles.example.json   # Шаблон конфигурации SOCKS5 прокси
-│   └── README.md                     # Документация подсистемы прокси
+│   ├── proxy-profiles.example.json   # Template for SOCKS5 proxy configurations
+│   └── README.md                     # Proxy subsystem notes
 ├── docs/
-│   ├── hardware-spoofing-research.md # Исследование методов спуфинга Hyper-V GPU-PV
-│   ├── plan.md                       # Архитектурный план и расчеты VRAM/vCPU
-│   └── prompt.md                     # Контекст начального проектирования
+│   ├── hardware-spoofing-research.md # Hyper-V GPU-PV anti-detection research
+│   ├── plan.md                       # Resource calculations and architecture plan
+│   └── prompt.md                     # Project background notes
 ├── iso/
 │   ├── .gitkeep
-│   └── README.md                     # Инструкция: сюда помещается образ Windows 11 ISO
+│   └── README.md                     # Place Windows 11 ISO here
 ├── scripts/
-│   ├── guest/                        # Скрипты, внедряемые внутрь гостевой ОС
-│   │   ├── ensure_static_ip.ps1      # Сторожевой сервис сети и LSA-авторизации
-│   │   ├── Guest-HyperV-CleanID.ps1  # Внутригостевой рандомизатор идентификаторов
-│   │   ├── Verify-HWID.ps1           # Скрипт глубокого аудита оборудования (HWID)
-│   │   └── README.md                 # Описание гостевых утилит
-│   ├── 00-Download-Tools.ps1         # Автоматическая загрузка внешних утилит
-│   ├── 01-Setup-Network.ps1          # Настройка виртуального свитча и WinNAT
-│   ├── 02-Prepare-Drivers.ps1        # Извлечение драйверов GPU и подготовка VDD/Sunshine
-│   ├── 03-Build-GamingVM.ps1         # Автономная DISM-сборка базового диска (150 ГБ)
-│   ├── 04-Configure-GPU-PV.ps1       # Развертывание Gaming-VM1 (Differencing Disk + 1GB GPU)
-│   ├── 05-Clone-VM.ps1               # Мгновенное создание дополнительных ВМ (Gaming-VM2..n)
-│   ├── Host-HyperV-Randomize.ps1     # Спуфинг SMBIOS, UUID, MAC, SCSI Disk ID
-│   ├── Host-Proxy-Manager.ps1        # Менеджер прозрачной SOCKS5-маршрутизации хоста
-│   └── HyperV-Workstation.ps1        # Графический интерфейс управления (WPF GUI)
+│   ├── guest/                        # In-guest maintenance scripts
+│   │   ├── ensure_static_ip.ps1      # Network watchdog and LSA auth service
+│   │   ├── Guest-HyperV-CleanID.ps1  # In-guest identifier randomizer
+│   │   ├── Verify-HWID.ps1           # HWID audit and verification script
+│   │   └── README.md                 # Guest utilities documentation
+│   ├── 00-Download-Tools.ps1         # Automated prerequisite downloader
+│   ├── 01-Setup-Network.ps1          # Virtual switch and WinNAT setup
+│   ├── 02-Prepare-Drivers.ps1        # GPU driver staging & VDD/Sunshine setup
+│   ├── 03-Build-GamingVM.ps1         # Offline DISM builder for master VHDX (150 GB)
+│   ├── 04-Configure-GPU-PV.ps1       # Deploys Gaming-VM1 (Differencing VHDX + GPU slice)
+│   ├── 05-Clone-VM.ps1               # Fast cloning script for additional VMs
+│   ├── Host-HyperV-Randomize.ps1     # Host-side hardware spoofing engine
+│   ├── Host-Proxy-Manager.ps1        # Host-side SOCKS5 proxy router manager
+│   └── HyperV-Workstation.ps1        # WPF management GUI
 ├── software/
 │   └── desktop/
 │       ├── .gitkeep
-│       └── README.md                 # Инструкция: сюда помещается софт для рабочего стола ВМ
+│       └── README.md                 # Place guest desktop installers here
 ├── staging/
 │   ├── .gitkeep
-│   └── README.md                     # Временная папка для внедрения драйверов и пакетов
+│   └── README.md                     # Temporary staging folder for driver injection
 ├── tools/
 │   └── sing-box/
 │       ├── LICENSE
-│       └── README.md                 # Инструкция по установке Sing-box
-├── .gitignore                        # Полное исключение бинарников, ISO, VHDX и паролей
-├── README.md                         # Данное руководство
-├── Start-HyperV-Workstation.cmd      # Основной ярлык запуска консоли управления
-└── Start-HyperV-Workstation.bat      # Резервный файл запуска
+│       └── README.md                 # Sing-box binary instructions
+├── .gitignore                        # Strict rules excluding binaries, ISOs, and secrets
+├── LICENSE                           # MIT License
+├── README.md                         # Project documentation
+├── Start-HyperV-Workstation.cmd      # Primary launcher shortcut
+└── Start-HyperV-Workstation.bat      # Fallback launcher script
 ```
 
 ---
 
-## 3. Системные требования
+## Requirements
 
-### Хостовая машина:
-- **Процессор**: 64-битный процессор с поддержкой аппаратной виртуализации (**Intel VT-x / VT-d** или **AMD-V / IOMMU**), а также инструкций **POPCNT и SSE4.2** (обязательно для Windows 11 24H2/25H2). Виртуализация должна быть включена в BIOS/UEFI.
-- **Оперативная память**: от 16 ГБ (рекомендуется 32–64 ГБ для запуска 4–5 ВМ одновременно по 8 ГБ на ВМ).
-- **Видеокарта**: NVIDIA GeForce / RTX / Quadro с поддержкой GPU Partitioning и драйвером WDDM (проверяется командлетом `Get-VMHostPartitionableGpu`).
-- **Операционная система хоста**: Windows 11 Pro / Enterprise / Education или Windows Server 2022/2025 с установленным компонентом Hyper-V.
+- **Host OS**: Windows 11 Pro / Enterprise / Education (24H2/25H2) or Windows Server 2022/2025.
+- **Virtualization**: Intel VT-x / VT-d or AMD-V / IOMMU enabled in BIOS/UEFI.
+- **CPU**: Support for POPCNT and SSE4.2 instructions (required by Windows 11 24H2+).
+- **GPU**: NVIDIA GPU with WDDM driver supporting GPU Partitioning (`Get-VMHostPartitionableGpu`).
+- **Memory**: 16 GB RAM minimum (32–64 GB recommended for multiple concurrent VMs).
 
 ---
 
-## 4. Пошаговое развёртывание на новой машине
+## Quick Start
 
-Развёртывание полностью автоматизировано и занимает минимальное количество времени.
+Run PowerShell as **Administrator**:
 
-### Шаг 1. Клонирование репозитория
-Откройте PowerShell от имени Администратора:
+### 1. Clone the repository
 ```powershell
-cd C:\
 git clone https://github.com/1Stalk/hyper-v-workstation.git
 cd hyper-v-workstation
 ```
 
-### Шаг 2. Автоматическая загрузка внешних инструментов
-Запустите скрипт автоматической загрузки зависимостей:
+### 2. Download dependencies
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\00-Download-Tools.ps1
 ```
-Скрипт автоматически скачает и разложит по нужным папкам:
-- Ядро маршрутизации `sing-box.exe` в `tools\sing-box\`
-- Стриминговый сервер `sunshine.msi` в `staging\`
-- Драйвер виртуального дисплея `Virtual Display Driver (VDD)` в `staging\VDD\`
-- Утилиту установки драйверов `nefcon` в `staging\nefcon\`
-- Утилиту смены серийного номера тома `Volumeid64.exe` в `staging\`
+This automatically fetches `sing-box`, `sunshine`, `Virtual Display Driver (VDD)`, `nefcon`, and `VolumeId`.
 
-*(Опционально)*: Установите клиент [Moonlight-Qt](https://github.com/moonlight-stream/moonlight-qt/releases/latest) на хост-систему (по умолчанию устанавливается в `C:\Program Files\Moonlight Game Streaming\Moonlight.exe`).
+### 3. Add Windows 11 ISO & Desktop Software
+- Place your Windows 11 ISO (Pro/Business edition) into `iso/`.
+- *(Optional)* Place application installers (Chrome, RustDesk, RealVNC, etc.) into `software/desktop/`.
 
-### Шаг 3. Добавление ISO-образа Windows 11
-Положите установочный `.iso` файл Windows 11 (23H2, 24H2 или 25H2 x64 Pro/Business) в папку:
-```text
-iso/
-```
-Скрипт сборки **автоматически обнаружит** любой `.iso` файл в этой папке.
-
-### Шаг 4. Добавление программ для рабочего стола ВМ
-Положите установщики программ, которые вы хотите видеть на рабочем столе всех создаваемых виртуальных машин, в папку:
-```text
-software/desktop/
-```
-*Рекомендуемые программы:*
-- `ChromeSetup.exe` (браузер Google Chrome)
-- `rustdesk-*-x86_64.exe` (клиент удаленного рабочего стола)
-- `RealVNC` / VNC Viewer
-- `winrar-*-x64.exe` или `7-Zip`
-- `Winhance.Installer.exe` (твикер контекстного меню и приватности)
-- Лаунчеры игр, мессенджеры и т.д.
-
-Все файлы из этой папки будут автоматически скопированы в профиль `C:\Users\Public\Desktop` каждой созданной и склонированной виртуальной машины!
-
-### Шаг 5. Настройка сети Hyper-V (WinNAT)
-Выполните настройку изолированного внутреннего коммутатора:
+### 4. Setup Host Network
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\01-Setup-Network.ps1
 ```
-Будет создан внутренний свитч `VM-Gaming-Switch` с адресом шлюза `192.168.100.1/24`, правилами WinNAT и разрешающими портами брандмауэра для стриминга Sunshine/Moonlight.
+Configures internal switch `VM-Gaming-Switch` (`192.168.100.1/24`) and WinNAT.
 
-### Шаг 6. Подготовка драйверов хоста и гостевого окружения
-Запустите извлечение драйверов активной видеокарты NVIDIA и подготовку гостевых служб:
+### 5. Stage GPU Drivers
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\02-Prepare-Drivers.ps1
 ```
-Скрипт извлечёт библиотеки NVIDIA из `DriverStore`, настроит профиль Virtual Display Driver (1024x768 @ 60Hz по умолчанию) и подготовит автономный пакет установки.
+Extracts host NVIDIA drivers and prepares the guest installer package.
 
-### Шаг 7. Сборка базового эталонного диска (Gaming-Base.vhdx)
-Создайте чистый эталонный мастер-образ с Windows 11 Pro через DISM:
+### 6. Build Master Image & Deploy First VM
 ```powershell
+# Create master VHDX via offline DISM (takes ~3-5 mins)
 powershell -ExecutionPolicy Bypass -File scripts\03-Build-GamingVM.ps1
-```
-*Что делает скрипт:*
-1. Автоматически монтирует ISO из папки `iso/`.
-2. Создает динамический диск `C:\Hyper-V\VMs\Gaming-Base.vhdx` (150 ГБ) с разметкой GPT/UEFI.
-3. Разворачивает образ Windows 11 Pro напрямую через DISM (занимает 3–5 минут).
-4. Удаляет предустановленный потребительский мусор (BingNews, Solitaire, FeedbackHub и т.д., сохраняя Microsoft Store).
-5. Применяет твики Winhance (классическое контекстное меню, отображение расширений файлов, отключение телеметрии).
-6. Внедряет драйверы видеокарты хоста в `HostDriverStore` и `System32`.
-7. Размещает программы из `software/desktop/` на рабочем столе.
-8. Настраивает автоматический вход под пользователем `Gamer` без пароля.
-9. Устанавливает атрибут диска `ReadOnly` для защиты мастер-диска от повреждений.
 
-### Шаг 8. Развёртывание первой игровой ВМ (Gaming-VM1)
-Создайте первую виртуальную машину с привязкой 1 ГБ VRAM физической видеокарты:
-```powershell
+# Provision first VM (Gaming-VM1) with 1 GB VRAM slice
 powershell -ExecutionPolicy Bypass -File scripts\04-Configure-GPU-PV.ps1
 ```
-Машина мгновенно создаётся на базе разностного диска `Gaming-VM1.vhdx`, получает уникальный IP `192.168.100.11`, рандомизированный SMBIOS и аппаратный слайс GPU.
 
-### Шаг 9. Запуск консоли управления Hyper-V Workstation
-Запустите приложение:
-- Двойным кликом по файлу `Start-HyperV-Workstation.cmd`.
-
----
-
-## 5. Использование Hyper-V Workstation
-
-### Основные возможности интерфейса:
-- **Управление виртуальными машинами**: Запуск, принудительное выключение, перезагрузка одной кнопкой.
-- **Оконный стрим Moonlight**: Кнопка **[🖥️ Открыть окно (Moonlight)]** запускает сессию потоковой передачи с нулевой задержкой и захватом курсора (в стиле VMware Workstation).
-- **Спуфинг HWID железа**: Кнопка **[🎲 Спуфинг HWID]** перепрошивает SMBIOS, системный UUID, MAC сетевой карты, SCSI Disk Identifier и реестровые GUID выключенной машины.
-- **Мгновенное клонирование**: Кнопка **[➕ Клонировать новую VM]** разворачивает полноценную новую игровую машину (Gaming-VM2, VM3...) ровно за **20 секунд** без повторной установки Windows!
-- **SOCKS5 Прокси Менеджер**: Назначение внешних прокси на конкретные ВМ с автоматической защитой от утечек DNS и мгновенным Kill-Switch.
+### 7. Launch Console
+Double-click `Start-HyperV-Workstation.cmd` or run:
+```powershell
+powershell -ExecutionPolicy Bypass -STA -File scripts\HyperV-Workstation.ps1
+```
 
 ---
 
-## 6. Безопасность и защита данных
+## License
 
-- В репозитории полностью исключено хранение учетных данных. Рабочий файл `config/proxy-profiles.json` и кэш `config/sing-box.json` добавлены в `.gitignore`.
-- Для настройки прокси используйте шаблон `config/proxy-profiles.example.json` или вводите прокси прямо через интерфейс программы.
-- Большие бинарные файлы (`.iso`, `.vhdx`, `.exe`, `.msi`) не сохраняются в Git и загружаются/генерируются локально.
-
----
-
-## 7. Лицензия
-
-Проект распространяется под лицензией [MIT](LICENSE). Сторонние компоненты (Sing-box, Sunshine, Virtual Display Driver, NefCon, VolumeId) сохраняют свои оригинальные лицензии соответствующих авторов.
+This project is licensed under the [MIT License](LICENSE). Third-party tools (`sing-box`, `Sunshine`, `Virtual Display Driver`, `nefcon`, `VolumeId`) retain their original licenses.
