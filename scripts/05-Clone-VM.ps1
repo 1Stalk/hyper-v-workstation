@@ -20,10 +20,21 @@ param(
     [int]$CPUCount = 4,
     [int64]$MemoryBytes = 8GB,
     # 250,000,000 = 1GB (up to 4 VMs). For 5 VMs, use 200,000,000 (~800MB each)
-    [uint64]$VRAMUnits = 250000000
+    [uint64]$VRAMUnits = 250000000,
+    [string]$DesktopToolsSource = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($DesktopToolsSource)) {
+    $defaultSoftwareDir = Join-Path $RepoRoot "software\desktop"
+    if (Test-Path $defaultSoftwareDir) {
+        $DesktopToolsSource = $defaultSoftwareDir
+    } else {
+        $DesktopToolsSource = Join-Path $RepoRoot "staging\guest_setup\desktop_tools"
+    }
+}
 
 # Auto-elevate or require Administrator
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -138,21 +149,17 @@ try {
     # Ensure AntiOS is purged
     Get-ChildItem -Path "${winLetter}:\" -Filter "*AntiOS*" -Recurse -ErrorAction SilentlyContinue | Remove-Item -Force -Recurse -ErrorAction SilentlyContinue
 
-    # Ensure desktop tools are present strictly on Public Desktop (Strict 5 installers, no duplicates)
-    $desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
+    # Ensure desktop tools are present on Public Desktop
     $publicDesktop = "${winLetter}:\Users\Public\Desktop"
     New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
 
     # Clean any existing scripts or leftovers from Public Desktop
     Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-    # Copy exactly the 5 required installers to Public\Desktop only
-    if (Test-Path $desktopToolsSource) {
-        $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
-        foreach ($pattern in $allowedPatterns) {
-            Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
-                Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
-            }
+    # Copy all software installers to Public\Desktop
+    if ($DesktopToolsSource -and (Test-Path $DesktopToolsSource)) {
+        Get-ChildItem -Path $DesktopToolsSource | Where-Object { $_.Name -notlike ".*" -and $_.Name -notlike "README*" -and $_.Extension -ne ".md" } | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination $publicDesktop -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -160,11 +167,6 @@ try {
     $duplicateTargets = @("${winLetter}:\Users\Default\Desktop", "${winLetter}:\Users\Gamer\Desktop")
     foreach ($dupDir in $duplicateTargets) {
         if (Test-Path $dupDir) {
-            Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$dupDir\rustdesk*" -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
             Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
         }
     }
@@ -172,10 +174,18 @@ try {
     # Stage HWID scripts and Network Watchdog to C:\Setup (NOT to Desktop!)
     $setupDir = "${winLetter}:\Setup"
     New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
-    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
-    Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
-    $watchdogSource = "C:\Users\server1\Desktop\Hyper-V\staging\guest_setup\ensure_static_ip.ps1"
-    if (-not (Test-Path $watchdogSource)) { $watchdogSource = "C:\Users\server1\Desktop\Hyper-V\staging\ensure_static_ip.ps1" }
+    $verifySrc = Join-Path $PSScriptRoot "guest\Verify-HWID.ps1"
+    if (Test-Path $verifySrc) {
+        Copy-Item -Path $verifySrc -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+    }
+    $cleanIdSrc = Join-Path $PSScriptRoot "guest\Guest-HyperV-CleanID.ps1"
+    if (Test-Path $cleanIdSrc) {
+        Copy-Item -Path $cleanIdSrc -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+    }
+    $watchdogSource = Join-Path $PSScriptRoot "guest\ensure_static_ip.ps1"
+    if (-not (Test-Path $watchdogSource)) {
+        $watchdogSource = Join-Path (Split-Path $PSScriptRoot -Parent) "staging\guest_setup\ensure_static_ip.ps1"
+    }
     if (Test-Path $watchdogSource) {
         Copy-Item -Path $watchdogSource -Destination "$setupDir\ensure_static_ip.ps1" -Force -ErrorAction SilentlyContinue
     }

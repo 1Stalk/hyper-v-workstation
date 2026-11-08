@@ -1,47 +1,76 @@
 # ==============================================================================
-# Hyper-V GPU Partitioning (GPU-PV) - Git Ignore Rules
+# Hyper-V GPU-PV Gaming Cluster - Git Ignore Rules
 # ==============================================================================
 
-# Staging folder (downloaded installers, extracted drivers, VDD packages)
-staging/
-
-# Virtual Machine disks, differencing disks and checkpoints
+# Virtual Machine disks, images, and checkpoints
 *.vhdx
 *.vhd
 *.avhdx
 *.iso
 *.img
-*.bin
 
-# Hyper-V VM state and configuration directories
+# Hyper-V VM state, configuration, and runtime directories
 VMs/
 *.vmcx
 *.vmrs
 *.vsv
 
-# Logs, debug output and temporary scripts
+# Large executable binaries, libraries, and installers
+*.exe
+*.dll
+*.msi
+*.zip
+*.rar
+*.7z
+*.tar.gz
+*.sys
+
+# Keep required tracked tools metadata / licenses
+!tools/sing-box/LICENSE
+
+# Staging folder (downloaded installers, extracted drivers, VDD packages)
+staging/*
+!staging/.gitkeep
+!staging/README.md
+
+# Tools directory dynamic downloads
+tools/sing-box/*
+!tools/sing-box/.gitkeep
+!tools/sing-box/LICENSE
+!tools/sing-box/README.md
+tools/moonlight/
+
+# Guest ISO directory (keep directory placeholder and instructions)
+iso/*
+!iso/.gitkeep
+!iso/README.md
+
+# Guest desktop software directory (keep directory placeholder and instructions)
+software/desktop/*
+!software/desktop/.gitkeep
+!software/desktop/README.md
+
+# Logs, temporary files, diagnostics, and registry dumps
 *.log
-tools/sing-box/*.log
-tools/sing-box/*.err
 *.tmp
 *.bak
 *.bin
+*.reg
+handle64.exe
+diag_*.txt
 run_*.ps1
 test_*.ps1
-diag_*.txt
-*.reg
-handle64.exe
-*.txt
-*.reg
-handle64.exe
 
-# Media and screenshots
-*.png
-*.jpg
-*.jpeg
-*.bmp
+# Configuration files containing credentials
+config/proxy-profiles.json
+config/sing-box.json
+!config/proxy-profiles.example.json
 
-# Operating System files
+# Keep .gitkeep and documentation files in placeholder folders
+!**/.gitkeep
+!**/README.md
+
+# OS-generated files
 Thumbs.db
 ehthumbs.db
 Desktop.ini
@@ -50,4 +79,4 @@ $RECYCLE.BIN/
 # IDE / Editor folders
 .vscode/
 .idea/
-.example
+.example/

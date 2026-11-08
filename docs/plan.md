@@ -8,7 +8,7 @@
 | **Оперативная память** | **64 ГБ DDR4 ECC** | 8 ГБ на одну VM. При запуске 5 VM будет занято 40 ГБ RAM, оставляя 24 ГБ для хостовой ОС. |
 | **Видеокарта** | **NVIDIA GeForce GTX 1050 Ti** (4096 МБ VRAM, драйвер 560.94 WDDM) | `Get-VMHostPartitionableGpu` определяет карту. Аппаратный энкодер **NVENC** на драйверах ветки 560+ поддерживает до **8 одновременных сессий кодирования**, что позволяет транслировать 4-5 VM одновременно без задержек. |
 | **Дисковое пространство** | Диск C: — **901 ГБ свободно** | Достаточно для базового VHDX-образа (~20 ГБ) и 4-5 разностных дисков (differencing disks) по 10-20 ГБ каждый. |
-| **Гостевая ОС** | Windows 11 Pro 25H2 | Образ найден: `C:\Users\server1\Desktop\localserver1\ru-ru_windows_11_business_editions_version_25h2_updated_jan_2026_x64_dvd_d869ebf3.iso` (Индекс 3: Windows 11 Pro). |
+| **Гостевая ОС** | Windows 11 Pro 25H2 | Образ в `iso/`: `ru-ru_windows_11_business_editions_version_25h2_updated_jan_2026_x64_dvd_d869ebf3.iso` (Индекс 3: Windows 11 Pro). |
 
 ---
 

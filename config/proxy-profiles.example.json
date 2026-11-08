@@ -1,0 +1,38 @@
+{
+  "profiles": [
+    {
+      "id": "proxy-sample-1",
+      "name": "Sample SOCKS5 Proxy 1",
+      "server": "198.51.100.10",
+      "port": 1080,
+      "username": "user",
+      "password": "password",
+      "country": "Custom",
+      "city": "Custom",
+      "isp": "Custom"
+    },
+    {
+      "id": "proxy-sample-2",
+      "name": "Sample SOCKS5 Proxy 2",
+      "server": "198.51.100.20",
+      "port": 1080,
+      "username": "",
+      "password": "",
+      "country": "Custom",
+      "city": "Custom",
+      "isp": "Custom"
+    }
+  ],
+  "assignments": {
+    "Gaming-VM1": {
+      "enabled": false,
+      "profileId": "proxy-sample-1",
+      "ip": "192.168.100.11"
+    },
+    "Gaming-VM2": {
+      "enabled": false,
+      "profileId": "proxy-sample-2",
+      "ip": "192.168.100.12"
+    }
+  }
+}

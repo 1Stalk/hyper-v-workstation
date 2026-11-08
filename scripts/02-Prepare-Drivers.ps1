@@ -10,10 +10,30 @@
 
 [CmdletBinding()]
 param(
-    [string]$StagingRoot = "C:\Users\server1\Desktop\Hyper-V\staging"
+    [string]$StagingRoot = "",
+    [string]$DesktopToolsSource = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+# Auto-elevate or require Administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "02-Prepare-Drivers.ps1 must be run in an elevated PowerShell session (as Administrator)."
+}
+
+$RepoRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($StagingRoot)) {
+    $StagingRoot = Join-Path $RepoRoot "staging"
+}
+if ([string]::IsNullOrWhiteSpace($DesktopToolsSource)) {
+    $defaultSoftwareDir = Join-Path $RepoRoot "software\desktop"
+    if (Test-Path $defaultSoftwareDir) {
+        $DesktopToolsSource = $defaultSoftwareDir
+    } else {
+        $DesktopToolsSource = Join-Path $StagingRoot "guest_setup\desktop_tools"
+    }
+}
 
 Write-Host "=== Staging GPU-PV Drivers and Guest Packages ===" -ForegroundColor Cyan
 
@@ -118,19 +138,18 @@ Write-Host "[+] Staging Sunshine installer..." -ForegroundColor Cyan
 $sunshineMsiSource = Join-Path $StagingRoot "sunshine.msi"
 Copy-Item -Path $sunshineMsiSource -Destination "$guestSetupStaging\sunshine.msi" -Force
 
-# 7. Stage new desktop tools from new_system (Strictly 5 initial installers: ChromeSetup, RealVNC, RustDesk, Winhance, WinRAR)
-Write-Host "[+] Staging new desktop tools from new_system (Strict 5 installers)..." -ForegroundColor Cyan
-$sourceNewSystem = "C:\Users\server1\Desktop\localserver1\new_system"
+# 7. Stage desktop tools (from software\desktop or staging)
+Write-Host "[+] Staging desktop tools..." -ForegroundColor Cyan
 $destDesktopTools = Join-Path $guestSetupStaging "desktop_tools"
 New-Item -ItemType Directory -Path $destDesktopTools -Force | Out-Null
-if (Test-Path $sourceNewSystem) {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
-    foreach ($pattern in $allowedPatterns) {
-        Get-ChildItem -Path $sourceNewSystem -Filter $pattern | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $destDesktopTools -Force
-        }
+if ($DesktopToolsSource -and (Test-Path $DesktopToolsSource)) {
+    $toolsToStage = Get-ChildItem -Path $DesktopToolsSource | Where-Object { $_.Name -notlike ".*" -and $_.Name -notlike "README*" -and $_.Extension -ne ".md" }
+    foreach ($item in $toolsToStage) {
+        Copy-Item -Path $item.FullName -Destination $destDesktopTools -Recurse -Force
     }
-    Write-Host "    Staged desktop tools (5 installers) from $sourceNewSystem" -ForegroundColor Gray
+    Write-Host "    Staged $($toolsToStage.Count) desktop tool(s) from $DesktopToolsSource" -ForegroundColor Gray
+} else {
+    Write-Host "    [!] Notice: No desktop tools directory found ($DesktopToolsSource). Place installers in software\desktop" -ForegroundColor Yellow
 }
 
 # 8. Stage Sysinternals Volumeid64 and HWID Spoofing/Verification scripts
@@ -138,19 +157,24 @@ Write-Host "[+] Staging Sysinternals Volumeid64 and HWID scripts..." -Foreground
 $volSource = Join-Path $StagingRoot "Volumeid64.exe"
 if (Test-Path $volSource) {
     Copy-Item -Path $volSource -Destination "$guestSetupStaging\Volumeid64.exe" -Force
+} else {
+    Write-Host "    [!] Notice: Volumeid64.exe not found in $StagingRoot. Run scripts\00-Download-Tools.ps1" -ForegroundColor Yellow
 }
-$verifyScript = "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1"
+$verifyScript = Join-Path $PSScriptRoot "guest\Verify-HWID.ps1"
 if (Test-Path $verifyScript) {
     Copy-Item -Path $verifyScript -Destination "$guestSetupStaging\Verify-HWID.ps1" -Force
 }
-$cleanIdScript = "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1"
+$cleanIdScript = Join-Path $PSScriptRoot "guest\Guest-HyperV-CleanID.ps1"
 if (Test-Path $cleanIdScript) {
     Copy-Item -Path $cleanIdScript -Destination "$guestSetupStaging\Guest-HyperV-CleanID.ps1" -Force
 }
 
-# 9. Stage ensure_static_ip.ps1 from central staging
-Write-Host "[+] Staging ensure_static_ip.ps1 from central staging..." -ForegroundColor Cyan
-$centralWatchdog = Join-Path $StagingRoot "ensure_static_ip.ps1"
+# 9. Stage ensure_static_ip.ps1 from guest scripts
+Write-Host "[+] Staging ensure_static_ip.ps1 from guest scripts..." -ForegroundColor Cyan
+$centralWatchdog = Join-Path $PSScriptRoot "guest\ensure_static_ip.ps1"
+if (-not (Test-Path $centralWatchdog)) {
+    $centralWatchdog = Join-Path $StagingRoot "ensure_static_ip.ps1"
+}
 if (Test-Path $centralWatchdog) {
     Copy-Item -Path $centralWatchdog -Destination "$guestSetupStaging\ensure_static_ip.ps1" -Force
 }
@@ -285,13 +309,10 @@ if (-not (Test-Path $publicDesktop)) {
 # Clean any existing bat, ps1, or leftovers from Public Desktop
 Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-# Copy exactly the 5 required installers to Public\Desktop only
+# Copy all software installers to Public\Desktop
 if (Test-Path "C:\Setup\desktop_tools") {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
-    foreach ($pattern in $allowedPatterns) {
-        Get-ChildItem -Path "C:\Setup\desktop_tools" -Filter $pattern | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
-        }
+    Get-ChildItem -Path "C:\Setup\desktop_tools" | Where-Object { $_.Name -notlike ".*" -and $_.Name -notlike "README*" -and $_.Extension -ne ".md" } | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $publicDesktop -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

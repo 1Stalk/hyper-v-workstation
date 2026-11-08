@@ -18,6 +18,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Auto-elevate or require Administrator
+$currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
+if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw "01-Setup-Network.ps1 must be run in an elevated PowerShell session (as Administrator)."
+}
+
 Write-Host "=== Setting up Hyper-V Gaming Network ===" -ForegroundColor Cyan
 
 # 1. Check or Create Virtual Switch

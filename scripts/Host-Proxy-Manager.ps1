@@ -11,14 +11,14 @@
 [CmdletBinding()]
 param()
 
-$Script:RootDir = "C:\Users\server1\Desktop\Hyper-V"
+$Script:RootDir = Split-Path -Parent $PSScriptRoot
 $Script:ConfigDir = Join-Path $Script:RootDir "config"
 $Script:ProfilesFile = Join-Path $Script:ConfigDir "proxy-profiles.json"
 $Script:SingBoxDir = Join-Path $Script:RootDir "tools\sing-box"
 $Script:SingBoxExe = Join-Path $Script:SingBoxDir "sing-box.exe"
 $Script:SingBoxCfg = Join-Path $Script:ConfigDir "sing-box.json"
 $Script:SingBoxLog = Join-Path $Script:SingBoxDir "sing-box.log"
-$Script:GuestWatchdog = Join-Path $Script:RootDir "staging\ensure_static_ip.ps1"
+$Script:GuestWatchdog = Join-Path $PSScriptRoot "guest\ensure_static_ip.ps1"
 
 # Default VM Static IPs mapping
 $Script:VMIPMap = @{
@@ -45,36 +45,18 @@ function Get-ProxyConfig {
         }
     }
     
-    # Default initial configuration
+    $exampleFile = Join-Path $Script:ConfigDir "proxy-profiles.example.json"
+    if (Test-Path $exampleFile) {
+        try {
+            Copy-Item -Path $exampleFile -Destination $Script:ProfilesFile -Force
+            return Get-Content $Script:ProfilesFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {}
+    }
+
+    # Default clean configuration if template is absent
     $defaultCfg = [PSCustomObject]@{
-        profiles = @(
-            [PSCustomObject]@{
-                id = "proxy-1"
-                name = "Bouygues Telecom FR 1 (Marseille)"
-                server = "198.51.100.1"
-                port = 47095
-                username = "REDACTED_USER"
-                password = "REDACTED_PASSWORD"
-                country = "FR"
-                city = "Marseille"
-                isp = "Bouygues Telecom SA"
-            },
-            [PSCustomObject]@{
-                id = "proxy-2"
-                name = "Bouygues Telecom FR 2 (Marseille)"
-                server = "198.51.100.1"
-                port = 46791
-                username = "REDACTED_USER"
-                password = "REDACTED_PASSWORD"
-                country = "FR"
-                city = "Marseille"
-                isp = "Bouygues Telecom SA"
-            }
-        )
-        assignments = [PSCustomObject]@{
-            "Gaming-VM1" = [PSCustomObject]@{ enabled = $true; profileId = "proxy-1" }
-            "Gaming-VM2" = [PSCustomObject]@{ enabled = $true; profileId = "proxy-2" }
-        }
+        profiles = @()
+        assignments = [PSCustomObject]@{}
     }
     Save-ProxyConfig $defaultCfg
     return $defaultCfg
@@ -327,6 +309,10 @@ function Start-ProxyEngine {
         Write-Host "[*] No active proxy assignments. Sing-box engine not required." -ForegroundColor Yellow
         Stop-ProxyEngine
         return
+    }
+
+    if (-not (Test-Path $Script:SingBoxExe)) {
+        throw "Sing-box executable not found at '$Script:SingBoxExe'! Run 'scripts\00-Download-Tools.ps1' or place sing-box.exe in '$Script:SingBoxDir'."
     }
 
     # Validate configuration syntax

@@ -17,13 +17,36 @@ param(
     [string]$VMName = "Gaming-Base",
     [string]$VHDPath = "C:\Hyper-V\VMs\Gaming-Base.vhdx",
     [int]$VHDSizeGB = 150,
-    [string]$IsoPath = "C:\Users\server1\Desktop\localserver1\ru-ru_windows_11_business_editions_version_25h2_updated_jan_2026_x64_dvd_d869ebf3.iso",
+    [string]$IsoPath = "",
     [int]$ImageIndex = 3, # Windows 11 Pro
     [string]$GuestIP = "192.168.100.11",
-    [string]$StagingRoot = "C:\Users\server1\Desktop\Hyper-V\staging"
+    [string]$StagingRoot = "",
+    [string]$DesktopToolsSource = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = Split-Path $PSScriptRoot -Parent
+if ([string]::IsNullOrWhiteSpace($StagingRoot)) {
+    $StagingRoot = Join-Path $RepoRoot "staging"
+}
+if ([string]::IsNullOrWhiteSpace($DesktopToolsSource)) {
+    $defaultSoftwareDir = Join-Path $RepoRoot "software\desktop"
+    if (Test-Path $defaultSoftwareDir) {
+        $DesktopToolsSource = $defaultSoftwareDir
+    } else {
+        $DesktopToolsSource = Join-Path $StagingRoot "guest_setup\desktop_tools"
+    }
+}
+
+if ([string]::IsNullOrWhiteSpace($IsoPath)) {
+    $isoFolder = Join-Path $RepoRoot "iso"
+    $foundIso = Get-ChildItem -Path $isoFolder -Filter "*.iso" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($foundIso) {
+        $IsoPath = $foundIso.FullName
+        Write-Host "[*] Auto-detected ISO from iso/: $IsoPath" -ForegroundColor Cyan
+    }
+}
 
 # Auto-elevate or require Administrator
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -34,8 +57,8 @@ if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Adm
 Write-Host "=== Starting Build for $VMName ===" -ForegroundColor Cyan
 
 # 1. Validation
-if (-not (Test-Path $IsoPath)) {
-    throw "Target ISO not found at: $IsoPath"
+if (-not $IsoPath -or -not (Test-Path $IsoPath)) {
+    throw "Target Windows ISO not found! Please place a Windows 11 ISO in '$RepoRoot\iso\' or specify -IsoPath 'C:\path\to\windows.iso'"
 }
 $stagingDrivers = Join-Path $StagingRoot "drivers"
 $stagingGuestSetup = Join-Path $StagingRoot "guest_setup"
@@ -207,22 +230,18 @@ try {
     reg unload HKLM\Offline_SOFTWARE 2>&1 | Out-Null
 }
 
-# 9. Deploy Desktop Tools to Guest Desktop (Strictly 5 initial installers: ChromeSetup, RealVNC, RustDesk, Winhance, WinRAR)
-Write-Host "[+] Deploying new desktop tools to Guest Public Desktop (Strict 5 installers, no duplicates)..." -ForegroundColor Green
-$desktopToolsSource = "C:\Users\server1\Desktop\localserver1\new_system"
+# 9. Deploy Desktop Tools to Guest Desktop
+Write-Host "[+] Deploying desktop tools to Guest Public Desktop..." -ForegroundColor Green
 $publicDesktop = "${winLetter}:\Users\Public\Desktop"
 New-Item -ItemType Directory -Path $publicDesktop -Force -ErrorAction SilentlyContinue | Out-Null
 
 # Clean any existing scripts or leftovers from Public Desktop
 Remove-Item -Path "$publicDesktop\*.bat", "$publicDesktop\*.ps1", "$publicDesktop\*AntiOS*" -Force -ErrorAction SilentlyContinue
 
-# Copy exactly the 5 required installers to Public\Desktop only
-if (Test-Path $desktopToolsSource) {
-    $allowedPatterns = @("ChromeSetup*", "RealVNC*", "rustdesk*", "Winhance*", "winrar*")
-    foreach ($pattern in $allowedPatterns) {
-        Get-ChildItem -Path $desktopToolsSource -Filter $pattern | ForEach-Object {
-            Copy-Item -Path $_.FullName -Destination $publicDesktop -Force -ErrorAction SilentlyContinue
-        }
+# Copy all software installers to Public\Desktop
+if ($DesktopToolsSource -and (Test-Path $DesktopToolsSource)) {
+    Get-ChildItem -Path $DesktopToolsSource | Where-Object { $_.Name -notlike ".*" -and $_.Name -notlike "README*" -and $_.Extension -ne ".md" } | ForEach-Object {
+        Copy-Item -Path $_.FullName -Destination $publicDesktop -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -230,11 +249,6 @@ if (Test-Path $desktopToolsSource) {
 $duplicateTargets = @("${winLetter}:\Users\Default\Desktop", "${winLetter}:\Users\Gamer\Desktop")
 foreach ($dupDir in $duplicateTargets) {
     if (Test-Path $dupDir) {
-        Remove-Item -Path "$dupDir\ChromeSetup*" -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "$dupDir\RealVNC*" -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "$dupDir\rustdesk*" -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "$dupDir\Winhance*" -Force -ErrorAction SilentlyContinue
-        Remove-Item -Path "$dupDir\winrar*" -Force -ErrorAction SilentlyContinue
         Remove-Item -Path "$dupDir\*.bat", "$dupDir\*.ps1", "$dupDir\*AntiOS*" -Force -ErrorAction SilentlyContinue
     }
 }
@@ -242,8 +256,14 @@ foreach ($dupDir in $duplicateTargets) {
 # Stage HWID scripts to C:\Setup (NOT to Desktop!)
 $setupDir = "${winLetter}:\Setup"
 New-Item -ItemType Directory -Path $setupDir -Force -ErrorAction SilentlyContinue | Out-Null
-Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Verify-HWID.ps1" -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
-Copy-Item -Path "C:\Users\server1\Desktop\Hyper-V\.example\Guest-HyperV-CleanID.ps1" -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+$verifySrc = Join-Path $PSScriptRoot "guest\Verify-HWID.ps1"
+if (Test-Path $verifySrc) {
+    Copy-Item -Path $verifySrc -Destination "$setupDir\Verify-HWID.ps1" -Force -ErrorAction SilentlyContinue
+}
+$cleanIdSrc = Join-Path $PSScriptRoot "guest\Guest-HyperV-CleanID.ps1"
+if (Test-Path $cleanIdSrc) {
+    Copy-Item -Path $cleanIdSrc -Destination "$setupDir\Guest-HyperV-CleanID.ps1" -Force -ErrorAction SilentlyContinue
+}
 
 # 10. Inject Unattended Setup XML
 Write-Host "[+] Injecting unattend.xml..." -ForegroundColor Green
